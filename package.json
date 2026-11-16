@@ -1,0 +1,14 @@
+{
+  "name": "irigasi-cerdas-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Irigasi Cerdas — Dasbor Pemantauan & Kontrol Irigasi Lahan dengan Netlify Database",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build-static.js"
+  },
+  "dependencies": {
+    "@netlify/database": "^1.1.0",
+    "@netlify/functions": "^3.1.10"
+  }
+}

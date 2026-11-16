@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Irigasi Cerdas — Dasbor Pemantauan Kelembapan Tanah, Tandon Air, Cuaca, dan Kontrol Pompa Otomatis.">
+  <title>Irigasi Cerdas — Dasbor Lahan</title>
+
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#F1F8F3',
+              100: '#E3F3E7',
+              200: '#C5E6CE',
+              500: '#22A055',
+              600: '#16803C',
+              700: '#146632',
+              800: '#124D27',
+            },
+            pastel: {
+              greenBg: '#F1F8F3',
+              greenIcon: '#DCF1E1',
+              blueBg: '#EFF7FD',
+              blueIcon: '#DCEEFB',
+              yellowBg: '#FEF9EC',
+              yellowIcon: '#FDECC8',
+              purpleBg: '#F6F3FC',
+              purpleIcon: '#EAE2FA',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-[#F6F8F7] text-[#111827] font-sans antialiased selection:bg-brand-100 selection:text-brand-800">
+
+  <!-- Mobile Sidebar Backdrop -->
+  <div id="sidebar-overlay" class="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-[1px] opacity-0 pointer-events-none transition-opacity duration-200 lg:hidden" aria-hidden="true"></div>
+
+  <div class="min-h-screen w-full flex flex-col lg:flex-row bg-white">
+
+    <!-- =======================================================================
+         LEFT SIDEBAR NAVIGATION
+         ======================================================================= -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-[#EEF2EF] flex flex-col transform -translate-x-full transition-transform duration-250 ease-out lg:translate-x-0 lg:static lg:flex-shrink-0" aria-label="Menu Navigasi Utama">
+
+      <!-- Brand Logo -->
+      <div class="h-[72px] px-6 flex items-center justify-between border-b border-[#F2F5F3]">
+        <a href="#dashboard" class="flex items-center gap-3 group focus:outline-none" data-nav="dashboard">
+          <div class="w-9 h-9 rounded-xl bg-brand-100 flex items-center justify-center text-brand-600 transition-transform duration-200 group-hover:scale-105">
+            <!-- Green leaf + water droplet icon -->
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" fill="#DCF1E1"/>
+              <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+              <path d="M12 2.5c0 0-3 3.2-3 5.2a3 3 0 0 0 6 0c0-2-3-5.2-3-5.2Z" fill="#22A055" stroke="none"/>
+            </svg>
+          </div>
+          <span class="text-[19px] font-extrabold tracking-tight text-[#1A4D2E]">Irigasi Cerdas</span>
+        </a>
+
+        <!-- Close button on mobile -->
+        <button id="sidebar-close-btn" type="button" class="lg:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700" aria-label="Tutup menu">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Navigation Groups -->
+      <nav class="flex-1 px-4 py-6 space-y-7 overflow-y-auto">
+        <!-- MENU UTAMA -->
+        <div>
+          <p class="px-3 mb-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">MENU UTAMA</p>
+          <ul class="space-y-1" role="list">
+            <li>
+              <a href="#dashboard" data-nav="dashboard" class="nav-item active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-semibold transition-colors" aria-current="page">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+                <span>Dashboard</span>
+              </a>
+            </li>
+            <li>
+              <a href="#petak-lahan" data-nav="petak-lahan" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <path d="M8 11l2.5 2.5L16 8"></path>
+                </svg>
+                <span>Petak Lahan</span>
+              </a>
+            </li>
+            <li>
+              <a href="#cuaca" data-nav="cuaca" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2v2"></path>
+                  <path d="m4.93 4.93 1.41 1.41"></path>
+                  <path d="M20 12h2"></path>
+                  <path d="m19.07 4.93-1.41 1.41"></path>
+                  <path d="M15.947 12.65a4 4 0 0 0-5.925-4.128"></path>
+                  <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"></path>
+                </svg>
+                <span>Cuaca</span>
+              </a>
+            </li>
+            <li>
+              <a href="#kontrol-irigasi" data-nav="kontrol-irigasi" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                </svg>
+                <span>Kontrol Irigasi</span>
+              </a>
+            </li>
+            <li>
+              <a href="#laporan" data-nav="laporan" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+                <span>Laporan</span>
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- PENGATURAN -->
+        <div>
+          <p class="px-3 mb-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">PENGATURAN</p>
+          <ul class="space-y-1" role="list">
+            <li>
+              <a href="#pengaturan-alat" data-nav="pengaturan-alat" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span>Pengaturan Alat</span>
+              </a>
+            </li>
+            <li>
+              <a href="#bantuan" data-nav="bantuan" class="nav-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span>Bantuan</span>
+              </a>
+            </li>
+          </ul>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- =======================================================================
+         MAIN CONTENT WRAPPER
+         ======================================================================= -->
+    <div class="flex-1 flex flex-col min-w-0 bg-[#FAFBFB]">
+
+      <!-- TOP HEADER BAR -->
+      <header class="h-[72px] bg-white border-b border-[#EEF2EF] px-4 sm:px-7 flex items-center justify-between gap-3 sticky top-0 z-30">
+        <div class="flex items-center gap-3 min-w-0">
+          <!-- Mobile Hamburger -->
+          <button id="menu-toggle-btn" type="button" class="lg:hidden p-2 -ml-1 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="Buka menu navigasi" aria-expanded="false" aria-controls="sidebar">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+
+          <!-- User Profile Info (left side like reference image) -->
+          <div class="min-w-0">
+            <p id="header-user-name" class="text-[15px] font-bold text-slate-900 truncate">Pengguna</p>
+            <p id="header-user-role" class="text-[12px] font-medium text-slate-500 truncate">Pemilik Lahan</p>
+          </div>
+        </div>
+
+        <!-- Top-right Actions -->
+        <div class="flex items-center gap-2 sm:gap-3.5 relative">
+          <!-- Notification Bell -->
+          <div class="relative">
+            <button id="notif-btn" type="button" class="relative p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors" aria-label="Notifikasi" aria-expanded="false">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              <span id="notif-dot" class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white"></span>
+            </button>
+
+            <!-- Notification Popover -->
+            <div id="notif-popover" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl p-4 z-50">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-slate-900">Pemberitahuan Lahan</h3>
+                <button id="notif-clear-btn" type="button" class="text-xs font-semibold text-brand-600 hover:underline">Tandai dibaca</button>
+              </div>
+              <ul class="space-y-2.5 text-xs">
+                <li class="p-2.5 rounded-xl bg-brand-50 border border-brand-100 text-slate-700">
+                  <p class="font-semibold text-slate-900">Greenhouse 1 sedang disiram</p>
+                  <p class="text-slate-500 mt-0.5">Kelembapan turun ke 42%, pompa menyala otomatis.</p>
+                </li>
+                <li class="p-2.5 rounded-xl bg-amber-50 border border-amber-100 text-slate-700">
+                  <p class="font-semibold text-slate-900">Peluang Hujan 70% siang ini</p>
+                  <p class="text-slate-500 mt-0.5">Jadwal penyiraman pukul 13:00 WIB ditunda hemat air.</p>
+                </li>
+                <li class="p-2.5 rounded-xl bg-sky-50 border border-sky-100 text-slate-700">
+                  <p class="font-semibold text-slate-900">Tandon air aman (85% penuh)</p>
+                  <p class="text-slate-500 mt-0.5">Kapasitas cukup untuk penyiraman 2 hari ke depan.</p>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="hidden sm:block h-6 w-px bg-slate-200" aria-hidden="true"></div>
+
+          <!-- Green-outlined Button: Unduh Laporan -->
+          <button id="btn-download-report" type="button" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-brand-600 bg-brand-50/60 hover:bg-brand-100/80 text-brand-700 text-[13px] font-semibold transition-colors">
+            <svg class="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span class="hidden sm:inline">Unduh Laporan</span>
+            <span class="sm:hidden">Laporan</span>
+          </button>
+
+          <!-- User Avatar Badge & Account Menu -->
+          <div class="relative pl-1">
+            <button id="user-menu-btn" type="button" class="flex items-center gap-1.5 rounded-full focus:outline-none" aria-label="Menu akun pengguna" aria-expanded="false">
+              <div id="header-user-initials" class="w-9 h-9 rounded-full bg-brand-600 text-white font-bold text-sm flex items-center justify-center shadow-sm">
+                PG
+              </div>
+              <svg class="w-4 h-4 text-slate-500 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <div id="user-menu-popover" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-2xl border border-slate-200 shadow-xl p-2 z-50">
+              <div class="px-3 py-2 border-b border-slate-100">
+                <p id="popover-user-name" class="text-xs font-bold text-slate-900 truncate">Pengguna</p>
+                <p id="popover-user-role" class="text-[11px] text-slate-500 truncate">Pemilik Lahan</p>
+              </div>
+              <a href="login.html" id="btn-logout" class="mt-1 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                <span>Keluar / Ganti Akun</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- =====================================================================
+           MAIN DASHBOARD VIEW
+           ===================================================================== -->
+      <main id="main-content" class="flex-1 p-4 sm:p-6 lg:p-7 space-y-6">
+
+        <!-- VIEW: DASHBOARD (Default Active View) -->
+        <div id="view-dashboard" class="space-y-6">
+
+          <!-- Greeting Row -->
+          <section class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h1 id="greeting-heading" class="text-[22px] sm:text-[24px] font-bold tracking-tight text-slate-900">
+                Selamat Datang! 🌱
+              </h1>
+              <p class="text-[14px] text-slate-500 mt-0.5">
+                Berikut adalah kondisi lahan dan penyiraman hari ini.
+              </p>
+            </div>
+            <div class="sm:text-right flex sm:flex-col items-center sm:items-end gap-2 sm:gap-0.5 text-[13px]">
+              <span id="live-date" class="font-medium text-slate-600">Minggu, 15 November 2026</span>
+              <span id="live-clock" class="font-bold text-slate-800 tabular-nums">--:--:-- WIB</span>
+            </div>
+          </section>
+
+          <!-- Top 4 Pastel Summary Cards -->
+          <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5" aria-label="Ringkasan Kondisi Lahan">
+
+            <!-- Card 1 (Soft Green): Kondisi Tanah -->
+            <article class="rounded-2xl bg-[#EFF8F1] border border-[#E1EFE4] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
+              <div class="flex items-center justify-between mb-3.5">
+                <div class="w-10 h-10 rounded-xl bg-[#DDF1E1] text-brand-700 flex items-center justify-center" aria-hidden="true">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M7 20h10"></path>
+                    <path d="M10 20c5.5-2.5.8-6.4 3-10"></path>
+                    <path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path>
+                    <path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"></path>
+                  </svg>
+                </div>
+                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-brand-700 border border-[#D3EBD8]">Sensor Aktif</span>
+              </div>
+              <div>
+                <p class="text-[13px] font-medium text-slate-600">Kondisi Tanah</p>
+                <p id="card-soil-value" class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">Lembap (72%)</p>
+                <p class="text-[12.5px] font-medium text-brand-700 mt-2">Ideal untuk tanaman</p>
+              </div>
+            </article>
+
+            <!-- Card 2 (Soft Blue): Sisa Air Tandon -->
+            <article class="rounded-2xl bg-[#EEF6FD] border border-[#DCEBFA] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
+              <div class="flex items-center justify-between mb-3.5">
+                <div class="w-10 h-10 rounded-xl bg-[#DCEDFB] text-sky-700 flex items-center justify-center" aria-hidden="true">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                  </svg>
+                </div>
+                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-sky-700 border border-[#CFE4F7]">1.700 Liter</span>
+              </div>
+              <div>
+                <p class="text-[13px] font-medium text-slate-600">Sisa Air Tandon</p>
+                <p id="card-tank-value" class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">85% Penuh</p>
+                <p class="text-[12.5px] font-medium text-sky-700 mt-2">Aman dari meluber</p>
+              </div>
+            </article>
+
+            <!-- Card 3 (Soft Yellow): Pemakaian Listrik -->
+            <article class="rounded-2xl bg-[#FEF9EA] border border-[#F8EED0] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
+              <div class="flex items-center justify-between mb-3.5">
+                <div class="w-10 h-10 rounded-xl bg-[#FDECC8] text-amber-700 flex items-center justify-center" aria-hidden="true">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                </div>
+                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-amber-700 border border-[#F5E1B0]">Hemat 12%</span>
+              </div>
+              <div>
+                <p class="text-[13px] font-medium text-slate-600">Pemakaian Listrik</p>
+                <p class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">Rp 32.000</p>
+                <p class="text-[12.5px] font-medium text-amber-700 mt-2">Estimasi bulan ini</p>
+              </div>
+            </article>
+
+            <!-- Card 4 (Soft Purple): Status Pompa (Interactive Toggle + Mode Selector) -->
+            <article id="card-pump-pastel" class="rounded-2xl bg-[#F5F2FC] border border-[#E7E0F8] p-5 flex flex-col justify-between transition-all hover:shadow-md">
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <div id="pump-card-icon" class="w-10 h-10 rounded-xl bg-[#E8E0FA] text-purple-700 flex items-center justify-center transition-colors" aria-hidden="true">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                    <line x1="12" y1="2" x2="12" y2="12"></line>
+                  </svg>
+                </div>
+
+                <!-- Interactive Mode Selector: Otomatis vs Manual -->
+                <div class="inline-flex items-center rounded-full bg-white/90 p-0.5 border border-[#E1D8F6]" role="group" aria-label="Pilih mode pompa">
+                  <button type="button" id="mode-btn-auto" data-mode="otomatis" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition-all bg-purple-600 text-white shadow-sm">
+                    Otomatis
+                  </button>
+                  <button type="button" id="mode-btn-manual" data-mode="manual" class="px-2.5 py-1 rounded-full text-[11px] font-semibold text-slate-600 hover:text-slate-900 transition-all">
+                    Manual
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <p class="text-[13px] font-medium text-slate-600">Status Pompa</p>
+                <div class="flex items-center justify-between gap-2 mt-1">
+                  <div class="min-w-0">
+                    <span id="pump-status-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[15px] font-extrabold bg-[#E8E0FA] text-purple-900 transition-colors">
+                      <span id="pump-status-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                      <span id="pump-status-text">MATI (Otomatis)</span>
+                    </span>
+                  </div>
+
+                  <!-- Prominent Interactive Toggle Switch (ON/OFF) -->
+                  <button
+                    type="button"
+                    id="pump-switch"
+                    role="switch"
+                    aria-checked="false"
+                    aria-label="Nyalakan atau matikan pompa air"
+                    class="relative inline-flex h-7 w-13 flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent bg-slate-300 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1"
+                    style="width: 52px;"
+                  >
+                    <span id="pump-switch-knob" class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out translate-x-0"></span>
+                  </button>
+                </div>
+                <p id="pump-subtext" class="text-[12px] font-medium text-purple-700 mt-2">
+                  Klik sakelar untuk kontrol manual ON/OFF
+                </p>
+              </div>
+            </article>
+
+          </section>
+
+          <!-- =================================================================
+               MIDDLE SECTION (2 COLUMNS: WIDE LINE CHART + JADWAL & AKTIVITAS)
+               ================================================================= -->
+          <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+            <!-- Left (Wide Line Chart - Grafik Kelembapan Tanah) -->
+            <div class="lg:col-span-8 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+                <div>
+                  <h2 class="text-[17px] font-bold text-slate-900">Grafik Kelembapan Tanah</h2>
+                  <div class="flex items-center gap-5 mt-2">
+                    <div class="flex items-center gap-2 text-[13px] font-medium text-slate-600">
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#1B6B3A]"></span>
+                      <span>Petak Utara</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[13px] font-medium text-slate-600">
+                      <span class="w-2.5 h-2.5 rounded-full bg-[#84CC4A]"></span>
+                      <span>Petak Selatan</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Week Filter Selector -->
+                <div class="relative">
+                  <select id="chart-range-select" aria-label="Pilih rentang waktu grafik" class="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-xl pl-3.5 pr-8 py-1.5 text-[13px] font-semibold text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">
+                    <option value="this-week">Minggu Ini</option>
+                    <option value="last-week">Minggu Lalu</option>
+                  </select>
+                  <svg class="w-4 h-4 text-slate-500 pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Interactive SVG Smooth Dual-Line Chart -->
+              <div class="relative mt-3 flex-1 min-h-[240px] select-none" id="moisture-chart-container">
+                <svg id="moisture-chart-svg" class="w-full h-[250px] overflow-visible" viewBox="0 0 700 240" preserveAspectRatio="none" role="img" aria-label="Grafik perbandingan kelembapan tanah Petak Utara dan Petak Selatan dari Senin hingga Minggu">
+                  <!-- Populated dynamically via app.js -->
+                </svg>
+
+                <!-- Interactive Floating Tooltip -->
+                <div id="chart-tooltip" class="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 bg-white border border-slate-200/90 rounded-xl shadow-lg px-3.5 py-2.5 text-[12px] transition-all duration-150 z-10 min-w-[180px]">
+                  <p id="tooltip-day" class="font-bold text-slate-800 mb-1">Kam, 12 Nov</p>
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="flex items-center gap-1.5 text-slate-600">
+                      <span class="w-2 h-2 rounded-full bg-[#1B6B3A]"></span>
+                      Utara: <strong id="tooltip-utara" class="text-slate-900">68%</strong>
+                    </span>
+                    <span class="flex items-center gap-1.5 text-slate-600">
+                      <span class="w-2 h-2 rounded-full bg-[#84CC4A]"></span>
+                      Selatan: <strong id="tooltip-selatan" class="text-slate-900">54%</strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right (List Card - Jadwal & Aktivitas) -->
+            <div class="lg:col-span-4 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-[17px] font-bold text-slate-900">Jadwal &amp; Aktivitas</h2>
+                <button type="button" data-jump-nav="kontrol-irigasi" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                  Lihat Semua
+                </button>
+              </div>
+
+              <ul class="space-y-3.5 flex-1" id="activity-list">
+                <!-- Item 1 -->
+                <li class="flex items-center justify-between gap-3 p-2.5 -mx-2 rounded-xl hover:bg-slate-50/80 transition-colors">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-[#E8F5E9] text-brand-600 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                      </svg>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[13.5px] font-bold text-slate-900 truncate">Penyiraman Otomatis Selesai</p>
+                      <p class="text-[12px] text-slate-500 truncate">Petak Utara • 06:00 WIB</p>
+                    </div>
+                  </div>
+                  <span class="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#E8F5E9] text-brand-700">
+                    Selesai
+                  </span>
+                </li>
+
+                <!-- Item 2 -->
+                <li class="flex items-center justify-between gap-3 p-2.5 -mx-2 rounded-xl hover:bg-slate-50/80 transition-colors">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-[#FEF3C7] text-amber-600 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+                        <path d="M16 14v6"></path>
+                        <path d="M8 14v6"></path>
+                        <path d="M12 16v6"></path>
+                      </svg>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[13.5px] font-bold text-slate-900 truncate">Penyiraman Ditunda (Prediksi Hujan)</p>
+                      <p class="text-[12px] text-slate-500 truncate">Semua Petak • 13:00 WIB</p>
+                    </div>
+                  </div>
+                  <span class="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#FEF3C7] text-amber-700">
+                    Hemat Air
+                  </span>
+                </li>
+
+                <!-- Item 3 -->
+                <li class="flex items-center justify-between gap-3 p-2.5 -mx-2 rounded-xl hover:bg-slate-50/80 transition-colors">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-[#E0F2FE] text-sky-600 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                      </svg>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[13.5px] font-bold text-slate-900 truncate">Pengisian Tandon Otomatis</p>
+                      <p class="text-[12px] text-slate-500 truncate">Tandon Utama • 16:30 WIB</p>
+                    </div>
+                  </div>
+                  <span class="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#E0F2FE] text-sky-700">
+                    Terjadwal
+                  </span>
+                </li>
+
+                <!-- Item 4 -->
+                <li class="flex items-center justify-between gap-3 p-2.5 -mx-2 rounded-xl hover:bg-slate-50/80 transition-colors">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded-xl bg-[#EDE9FE] text-purple-600 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[13.5px] font-bold text-slate-900 truncate">Pengecekan Rutin Pompa</p>
+                      <p class="text-[12px] text-slate-500 truncate">Mesin Utama • Besok</p>
+                    </div>
+                  </div>
+                  <span class="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#EDE9FE] text-purple-700">
+                    Pengingat
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+          </section>
+
+          <!-- =================================================================
+               BOTTOM SECTION (2 COLUMNS: TABLE CARD + WEATHER WIDGET)
+               ================================================================= -->
+          <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+            <!-- Left (Table Card - Status Petak Lahan) -->
+            <div class="lg:col-span-8 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-[17px] font-bold text-slate-900">Status Petak Lahan</h2>
+                <button type="button" data-jump-nav="petak-lahan" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                  Lihat Semua Petak
+                </button>
+              </div>
+
+              <div class="overflow-x-auto -mx-2 px-2">
+                <table class="w-full text-left border-collapse min-w-[580px]">
+                  <thead>
+                    <tr class="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <th class="pb-3 pr-4">NAMA PETAK</th>
+                      <th class="pb-3 px-3">TANAMAN</th>
+                      <th class="pb-3 px-3">KELEMBAPAN</th>
+                      <th class="pb-3 px-3">STATUS POMPA</th>
+                      <th class="pb-3 pl-3 text-right">UPDATE TERAKHIR</th>
+                    </tr>
+                  </thead>
+                  <tbody id="plots-table-body" class="divide-y divide-slate-100 text-[13.5px]">
+                    <!-- Row 1: Petak Utara -->
+                    <tr class="hover:bg-slate-50/70 transition-colors">
+                      <td class="py-3.5 pr-4">
+                        <div class="flex items-center gap-3">
+                          <span class="w-8 h-8 rounded-full bg-[#E8F5E9] text-brand-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0">PU</span>
+                          <span class="font-bold text-slate-900">Petak Utara</span>
+                        </div>
+                      </td>
+                      <td class="py-3.5 px-3 font-medium text-slate-600">Cabai</td>
+                      <td class="py-3.5 px-3 font-bold text-slate-800">75%</td>
+                      <td class="py-3.5 px-3">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold bg-slate-100 text-slate-700">
+                          Mati (Cukup Air)
+                        </span>
+                      </td>
+                      <td class="py-3.5 pl-3 text-right text-slate-500 text-[12.5px]">Baru saja</td>
+                    </tr>
+
+                    <!-- Row 2: Petak Selatan -->
+                    <tr class="hover:bg-slate-50/70 transition-colors">
+                      <td class="py-3.5 pr-4">
+                        <div class="flex items-center gap-3">
+                          <span class="w-8 h-8 rounded-full bg-[#FEF3C7] text-amber-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0">PS</span>
+                          <span class="font-bold text-slate-900">Petak Selatan</span>
+                        </div>
+                      </td>
+                      <td class="py-3.5 px-3 font-medium text-slate-600">Tomat</td>
+                      <td class="py-3.5 px-3 font-bold text-slate-800">68%</td>
+                      <td class="py-3.5 px-3">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold bg-slate-100 text-slate-700">
+                          Mati (Cukup Air)
+                        </span>
+                      </td>
+                      <td class="py-3.5 pl-3 text-right text-slate-500 text-[12.5px]">5 menit lalu</td>
+                    </tr>
+
+                    <!-- Row 3: Greenhouse 1 -->
+                    <tr class="hover:bg-slate-50/70 transition-colors">
+                      <td class="py-3.5 pr-4">
+                        <div class="flex items-center gap-3">
+                          <span class="w-8 h-8 rounded-full bg-[#EDE9FE] text-purple-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0">G1</span>
+                          <span class="font-bold text-slate-900">Greenhouse 1</span>
+                        </div>
+                      </td>
+                      <td class="py-3.5 px-3 font-medium text-slate-600">Melon</td>
+                      <td class="py-3.5 px-3 font-bold text-amber-600">42%</td>
+                      <td class="py-3.5 px-3">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-semibold bg-[#E8F5E9] text-brand-700">
+                          <span class="w-1.5 h-1.5 rounded-full bg-brand-600 animate-pulse"></span>
+                          Menyiram (ON)
+                        </span>
+                      </td>
+                      <td class="py-3.5 pl-3 text-right text-slate-500 text-[12.5px]">Baru saja</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Right (Weather Widget - Prakiraan Cuaca Lokal) -->
+            <div class="lg:col-span-4 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between mb-4">
+                  <h2 class="text-[17px] font-bold text-slate-900">Prakiraan Cuaca Lokal</h2>
+                  <button type="button" data-jump-nav="cuaca" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                    Detail
+                  </button>
+                </div>
+
+                <!-- Main Weather Info -->
+                <div class="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+                  <div class="flex items-center gap-3">
+                    <!-- Weather Illustration -->
+                    <div id="weather-main-icon" class="w-14 h-14 flex-shrink-0 flex items-center justify-center" aria-hidden="true">
+                      <svg class="w-14 h-14" viewBox="0 0 64 64" fill="none">
+                        <circle cx="24" cy="24" r="11" fill="#FBBF24"/>
+                        <g stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round">
+                          <line x1="24" y1="6" x2="24" y2="9"/>
+                          <line x1="24" y1="39" x2="24" y2="42"/>
+                          <line x1="6" y1="24" x2="9" y2="24"/>
+                          <line x1="11.3" y1="11.3" x2="13.4" y2="13.4"/>
+                          <line x1="34.6" y1="13.4" x2="36.7" y2="11.3"/>
+                        </g>
+                        <path d="M22 44h24a8 8 0 0 0 1.2-15.9A11 11 0 0 0 26 24.5 9.5 9.5 0 0 0 22 44Z" fill="#E2E8F0" stroke="#CBD5E1" stroke-width="1.5"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <p id="weather-temp" class="text-[28px] font-extrabold text-slate-900 leading-none">--°C</p>
+                      <p id="weather-condition" class="text-[13px] font-medium text-slate-500 mt-1.5">Memuat cuaca...</p>
+                    </div>
+                  </div>
+
+                  <!-- Right-side Details -->
+                  <div class="text-right space-y-1.5 text-[12.5px]">
+                    <div class="flex items-center justify-end gap-2">
+                      <span class="text-slate-500">Kelembapan:</span>
+                      <span id="weather-humidity" class="font-bold text-slate-800">--%</span>
+                    </div>
+                    <div class="flex items-center justify-end gap-2">
+                      <span class="text-slate-500">Angin:</span>
+                      <span id="weather-wind" class="font-bold text-slate-800">-- km/jam</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Rain Chance Banner -->
+                <div id="weather-rain-banner" class="mt-3 px-3 py-2 rounded-xl bg-[#EEF6FD] border border-[#DCEBFA] flex items-center justify-between gap-2 text-[12px]">
+                  <span class="font-medium text-slate-600">Peluang Hujan:</span>
+                  <span id="weather-rain-text" class="font-bold text-sky-700">Memuat data...</span>
+                </div>
+              </div>
+
+              <!-- 4-Day Mini Forecast Row -->
+              <div id="weather-forecast-grid" class="grid grid-cols-4 gap-2 pt-4 mt-4 border-t border-slate-100 text-center">
+                <div class="p-2 rounded-xl bg-slate-50/70">
+                  <p class="text-[11px] font-bold text-slate-400">---</p>
+                  <div class="my-1.5 flex justify-center text-slate-300" aria-hidden="true">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>
+                  </div>
+                  <p class="text-[11.5px] font-bold text-slate-800">--° / --°</p>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-50/70">
+                  <p class="text-[11px] font-bold text-slate-400">---</p>
+                  <div class="my-1.5 flex justify-center text-slate-300" aria-hidden="true">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>
+                  </div>
+                  <p class="text-[11.5px] font-bold text-slate-800">--° / --°</p>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-50/70">
+                  <p class="text-[11px] font-bold text-slate-400">---</p>
+                  <div class="my-1.5 flex justify-center text-slate-300" aria-hidden="true">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>
+                  </div>
+                  <p class="text-[11.5px] font-bold text-slate-800">--° / --°</p>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-50/70">
+                  <p class="text-[11px] font-bold text-slate-400">---</p>
+                  <div class="my-1.5 flex justify-center text-slate-300" aria-hidden="true">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>
+                  </div>
+                  <p class="text-[11.5px] font-bold text-slate-800">--° / --°</p>
+                </div>
+              </div>
+            </div>
+
+          </section>
+        </div>
+
+        <!-- SECONDARY SUB-VIEWS (Activated when user clicks other sidebar links) -->
+        <div id="view-secondary" class="hidden space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 id="secondary-title" class="text-[22px] font-bold text-slate-900">Petak Lahan</h1>
+              <p id="secondary-subtitle" class="text-[14px] text-slate-500 mt-0.5">Kelola kondisi setiap petak tanaman secara langsung.</p>
+            </div>
+            <button type="button" id="btn-back-dashboard" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-50 text-brand-700 font-semibold text-sm hover:bg-brand-100 transition-colors">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              Kembali ke Dashboard
+            </button>
+          </div>
+          <div id="secondary-body" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <!-- Populated cleanly by JS depending on selected sidebar page -->
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 pointer-events-none flex flex-col gap-2" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

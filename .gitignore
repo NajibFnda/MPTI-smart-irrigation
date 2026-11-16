@@ -1,0 +1,6 @@
+.netlify
+/database/
+node_modules/
+/public/
+/skills/
+.env
