@@ -1,7 +1,8 @@
 /**
  * Irigasi Cerdas — Backend Server & Database SQLite (Zero External Dependencies)
  * Mendukung autentikasi bertoken, verifikasi & reset password OTP via Brevo,
- * serta persistensi status pompa, petak lahan, lokasi cuaca, dan log aktivitas.
+ * serta persistensi status pompa, tandon, listrik, jadwal, riwayat kelembapan,
+ * petak lahan, lokasi cuaca, profil, dan log aktivitas.
  */
 
 const http = require('node:http');
@@ -60,6 +61,12 @@ db.exec(`
     location_name TEXT NOT NULL DEFAULT 'Semarang, Jawa Tengah',
     latitude REAL NOT NULL DEFAULT -6.9932,
     longitude REAL NOT NULL DEFAULT 110.4203,
+    tank_level_pct INTEGER NOT NULL DEFAULT 85,
+    tank_capacity_liters INTEGER NOT NULL DEFAULT 2000,
+    water_used_liters INTEGER NOT NULL DEFAULT 320,
+    water_saved_liters INTEGER NOT NULL DEFAULT 1450,
+    energy_kwh REAL NOT NULL DEFAULT 22.1,
+    tariff_per_kwh INTEGER NOT NULL DEFAULT 1445,
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
   );
 
@@ -75,6 +82,27 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
   );
 
+  CREATE TABLE IF NOT EXISTS schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    plot_target TEXT NOT NULL DEFAULT 'Semua Petak',
+    time_wib TEXT NOT NULL,
+    duration_min INTEGER NOT NULL DEFAULT 15,
+    skip_on_rain INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS moisture_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day_date TEXT NOT NULL,
+    series_a INTEGER NOT NULL,
+    series_b INTEGER NOT NULL,
+    UNIQUE (user_id, day_date)
+  );
+
   CREATE TABLE IF NOT EXISTS activity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -86,16 +114,28 @@ db.exec(`
   );
 `);
 
-const existingCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-const alterStatements = [
+// Safe migrations for existing local SQLite tables
+const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+for (const [col, sql] of [
   ['email', 'ALTER TABLE users ADD COLUMN email TEXT'],
   ['email_verified', 'ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0'],
   ['otp_hash', 'ALTER TABLE users ADD COLUMN otp_hash TEXT'],
   ['otp_expires_at', 'ALTER TABLE users ADD COLUMN otp_expires_at TEXT'],
   ['otp_attempts', 'ALTER TABLE users ADD COLUMN otp_attempts INTEGER NOT NULL DEFAULT 0'],
-];
-for (const [col, sql] of alterStatements) {
-  if (!existingCols.includes(col)) db.exec(sql);
+]) {
+  if (!userCols.includes(col)) db.exec(sql);
+}
+
+const settingsCols = db.prepare('PRAGMA table_info(user_settings)').all().map((c) => c.name);
+for (const [col, sql] of [
+  ['tank_level_pct', 'ALTER TABLE user_settings ADD COLUMN tank_level_pct INTEGER NOT NULL DEFAULT 85'],
+  ['tank_capacity_liters', 'ALTER TABLE user_settings ADD COLUMN tank_capacity_liters INTEGER NOT NULL DEFAULT 2000'],
+  ['water_used_liters', 'ALTER TABLE user_settings ADD COLUMN water_used_liters INTEGER NOT NULL DEFAULT 320'],
+  ['water_saved_liters', 'ALTER TABLE user_settings ADD COLUMN water_saved_liters INTEGER NOT NULL DEFAULT 1450'],
+  ['energy_kwh', 'ALTER TABLE user_settings ADD COLUMN energy_kwh REAL NOT NULL DEFAULT 22.1'],
+  ['tariff_per_kwh', 'ALTER TABLE user_settings ADD COLUMN tariff_per_kwh INTEGER NOT NULL DEFAULT 1445'],
+]) {
+  if (!settingsCols.includes(col)) db.exec(sql);
 }
 
 function hashPassword(password) {
@@ -176,6 +216,18 @@ function computePlotCode(name) {
   return 'PT';
 }
 
+function getJakartaDateString(offsetDays = 0) {
+  const now = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
 function formatCurrentTimeWib() {
   const parts = new Intl.DateTimeFormat('id-ID', {
     timeZone: 'Asia/Jakarta',
@@ -190,8 +242,12 @@ function ensureUserDashboardSeeded(userId) {
   const s = db.prepare('SELECT user_id FROM user_settings WHERE user_id = ?').get(userId);
   if (!s) {
     db.prepare(
-      `INSERT INTO user_settings (user_id, is_pump_on, pump_mode, min_moisture, max_moisture, location_name, latitude, longitude)
-       VALUES (?, 0, 'otomatis', 45, 75, 'Semarang, Jawa Tengah', -6.9932, 110.4203)`
+      `INSERT INTO user_settings (
+        user_id, is_pump_on, pump_mode, min_moisture, max_moisture,
+        location_name, latitude, longitude,
+        tank_level_pct, tank_capacity_liters, water_used_liters, water_saved_liters, energy_kwh, tariff_per_kwh
+      )
+      VALUES (?, 0, 'otomatis', 45, 75, 'Semarang, Jawa Tengah', -6.9932, 110.4203, 85, 2000, 320, 1450, 22.1, 1445)`
     ).run(userId);
   }
 
@@ -205,16 +261,51 @@ function ensureUserDashboardSeeded(userId) {
     insPlot.run(userId, 'G1', 'Greenhouse 1', 'Melon', 42, 1, 'Baru saja');
   }
 
+  const sc = db.prepare('SELECT id FROM schedules WHERE user_id = ? LIMIT 1').get(userId);
+  if (!sc) {
+    const insSc = db.prepare(
+      'INSERT INTO schedules (user_id, label, plot_target, time_wib, duration_min, skip_on_rain, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    insSc.run(userId, 'Siram Pagi Rutin', 'Semua Petak', '06:00', 15, 1, 1);
+    insSc.run(userId, 'Siram Siang (Hemat Air)', 'Greenhouse 1', '13:00', 10, 1, 1);
+    insSc.run(userId, 'Siram Sore & Cek Tandon', 'Semua Petak', '16:30', 15, 1, 1);
+  }
+
   const l = db.prepare('SELECT id FROM activity_logs WHERE user_id = ? LIMIT 1').get(userId);
   if (!l) {
     const insLog = db.prepare(
       'INSERT INTO activity_logs (user_id, title, subtitle, tag, tone) VALUES (?, ?, ?, ?, ?)'
     );
-    insLog.run(userId, 'Pengecekan Rutin Pompa', 'Mesin Utama • Besok', 'Pengingat', 'purple');
+    insLog.run(userId, 'Pengecekan Rutin Pompa', 'Mesin Utama • Terjadwal', 'Pengingat', 'purple');
     insLog.run(userId, 'Pengisian Tandon Otomatis', 'Tandon Utama • 16:30 WIB', 'Terjadwal', 'blue');
     insLog.run(userId, 'Penyiraman Ditunda (Prediksi Hujan)', 'Semua Petak • 13:00 WIB', 'Hemat Air', 'amber');
     insLog.run(userId, 'Penyiraman Otomatis Selesai', 'Petak Utara • 06:00 WIB', 'Selesai', 'green');
   }
+
+  const histCount = db.prepare('SELECT COUNT(*) AS cnt FROM moisture_history WHERE user_id = ?').get(userId).cnt;
+  if (histCount < 14) {
+    const sampleA = [52, 61, 65, 59, 66, 72, 70, 58, 69, 60, 68, 63, 69, 75];
+    const sampleB = [45, 51, 58, 47, 55, 60, 62, 49, 57, 50, 54, 51, 56, 68];
+    const insHist = db.prepare(
+      'INSERT OR IGNORE INTO moisture_history (user_id, day_date, series_a, series_b) VALUES (?, ?, ?, ?)'
+    );
+    for (let i = 0; i < 14; i++) {
+      insHist.run(userId, getJakartaDateString(i - 13), sampleA[i], sampleB[i]);
+    }
+  }
+}
+
+function syncTodayMoistureHistory(userId) {
+  const topPlots = db.prepare('SELECT moisture FROM plots WHERE user_id = ? ORDER BY id ASC LIMIT 2').all(userId);
+  if (topPlots.length === 0) return;
+  const seriesA = Number(topPlots[0].moisture ?? 65);
+  const seriesB = Number(topPlots[1]?.moisture ?? Math.max(25, seriesA - 8));
+  const todayStr = getJakartaDateString(0);
+  db.prepare(
+    `INSERT INTO moisture_history (user_id, day_date, series_a, series_b)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, day_date) DO UPDATE SET series_a = excluded.series_a, series_b = excluded.series_b`
+  ).run(userId, todayStr, seriesA, seriesB);
 }
 
 function addActivityLog(userId, { title, subtitle, tag, tone = 'green' }) {
@@ -225,16 +316,24 @@ function addActivityLog(userId, { title, subtitle, tag, tone = 'green' }) {
 
 function getDashboardSnapshot(userId) {
   ensureUserDashboardSeeded(userId);
-  const s = db
-    .prepare(
-      'SELECT is_pump_on, pump_mode, min_moisture, max_moisture, location_name, latitude, longitude FROM user_settings WHERE user_id = ?'
-    )
-    .get(userId);
+  syncTodayMoistureHistory(userId);
+
+  const s = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(userId);
   const plots = db
     .prepare('SELECT id, code, name, crop, moisture, pump_on, updated_label FROM plots WHERE user_id = ? ORDER BY id ASC')
     .all(userId);
+  const schedules = db
+    .prepare('SELECT id, label, plot_target, time_wib, duration_min, skip_on_rain, enabled FROM schedules WHERE user_id = ? ORDER BY time_wib ASC, id ASC')
+    .all(userId);
   const activities = db
-    .prepare('SELECT id, title, subtitle, tag, tone FROM activity_logs WHERE user_id = ? ORDER BY id DESC LIMIT 8')
+    .prepare('SELECT id, title, subtitle, tag, tone, created_at FROM activity_logs WHERE user_id = ? ORDER BY id DESC LIMIT 30')
+    .all(userId);
+  const historyRows = db
+    .prepare(
+      `SELECT day_date, series_a, series_b FROM (
+         SELECT day_date, series_a, series_b FROM moisture_history WHERE user_id = ? ORDER BY day_date DESC LIMIT 14
+       ) ORDER BY day_date ASC`
+    )
     .all(userId);
 
   return {
@@ -246,6 +345,12 @@ function getDashboardSnapshot(userId) {
       locationName: s.location_name || 'Semarang, Jawa Tengah',
       latitude: Number(s.latitude ?? -6.9932),
       longitude: Number(s.longitude ?? 110.4203),
+      tankLevelPct: Number(s.tank_level_pct ?? 85),
+      tankCapacityLiters: Number(s.tank_capacity_liters ?? 2000),
+      waterUsedLiters: Number(s.water_used_liters ?? 320),
+      waterSavedLiters: Number(s.water_saved_liters ?? 1450),
+      energyKwh: Number(Number(s.energy_kwh ?? 22.1).toFixed(2)),
+      tariffPerKwh: Number(s.tariff_per_kwh ?? 1445),
     },
     plots: plots.map((p) => ({
       id: p.id,
@@ -256,12 +361,27 @@ function getDashboardSnapshot(userId) {
       pumpOn: Boolean(p.pump_on),
       updated: p.updated_label || 'Baru saja',
     })),
+    schedules: schedules.map((sc) => ({
+      id: sc.id,
+      label: sc.label,
+      plotTarget: sc.plot_target,
+      timeWib: sc.time_wib,
+      durationMin: Number(sc.duration_min ?? 15),
+      skipOnRain: Boolean(sc.skip_on_rain),
+      enabled: Boolean(sc.enabled),
+    })),
     activities: activities.map((l) => ({
       id: l.id,
       title: l.title,
       subtitle: l.subtitle,
       tag: l.tag,
       tone: l.tone || 'green',
+      createdAt: l.created_at,
+    })),
+    moistureHistory: historyRows.map((h) => ({
+      dayDate: h.day_date,
+      seriesA: Number(h.series_a),
+      seriesB: Number(h.series_b),
     })),
   };
 }
@@ -334,36 +454,20 @@ const server = http.createServer(async (req, res) => {
           message: 'Mohon lengkapi Nama Lengkap, Email, Nomor WhatsApp/Username, dan Kata Sandi.',
         });
       }
-      if (!isValidEmail(email)) {
-        return sendJson(res, 400, { ok: false, message: 'Format alamat email tidak valid.' });
-      }
-      if (password.length < 6) {
-        return sendJson(res, 400, { ok: false, message: 'Kata Sandi minimal harus 6 karakter.' });
-      }
+      if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Format alamat email tidak valid.' });
+      if (password.length < 6) return sendJson(res, 400, { ok: false, message: 'Kata Sandi minimal harus 6 karakter.' });
 
-      const existingByEmail = db
-        .prepare('SELECT id, email_verified FROM users WHERE LOWER(email) = ?')
-        .get(email);
-
+      const existingByEmail = db.prepare('SELECT id, email_verified FROM users WHERE LOWER(email) = ?').get(email);
       if (existingByEmail && existingByEmail.email_verified) {
-        return sendJson(res, 409, {
-          ok: false,
-          message: 'Email sudah terdaftar dan terverifikasi. Silakan masuk.',
-        });
+        return sendJson(res, 409, { ok: false, message: 'Email sudah terdaftar dan terverifikasi. Silakan masuk.' });
       }
 
       const excludeId = existingByEmail ? existingByEmail.id : -1;
       const usernameConflict = db
-        .prepare(
-          'SELECT id FROM users WHERE id <> ? AND (LOWER(username) = ? OR (whatsapp IS NOT NULL AND LOWER(whatsapp) = ?))'
-        )
+        .prepare('SELECT id FROM users WHERE id <> ? AND (LOWER(username) = ? OR (whatsapp IS NOT NULL AND LOWER(whatsapp) = ?))')
         .get(excludeId, username, username);
-
       if (usernameConflict) {
-        return sendJson(res, 409, {
-          ok: false,
-          message: 'Nomor WhatsApp atau Username sudah terdaftar. Silakan gunakan yang lain.',
-        });
+        return sendJson(res, 409, { ok: false, message: 'Nomor WhatsApp atau Username sudah terdaftar.' });
       }
 
       const otp = generateOtpCode();
@@ -371,12 +475,7 @@ const server = http.createServer(async (req, res) => {
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
       const mailResult = await sendOtpViaBrevo({ toEmail: email, toName: fullName, otp });
-      if (!mailResult.ok) {
-        return sendJson(res, mailResult.status === 401 ? 502 : mailResult.status || 502, {
-          ok: false,
-          message: mailResult.message,
-        });
-      }
+      if (!mailResult.ok) return sendJson(res, mailResult.status || 502, { ok: false, message: mailResult.message });
 
       const isPhone = /^[0-9+\-\s]{8,16}$/.test(rawUsername);
       const whatsappVal = isPhone ? username : null;
@@ -384,10 +483,8 @@ const server = http.createServer(async (req, res) => {
 
       if (existingByEmail) {
         db.prepare(
-          `UPDATE users
-           SET full_name = ?, username = ?, whatsapp = ?, farm_name = ?, password_hash = ?,
-               email_verified = 0, otp_hash = ?, otp_expires_at = ?, otp_attempts = 0
-           WHERE id = ?`
+          `UPDATE users SET full_name = ?, username = ?, whatsapp = ?, farm_name = ?, password_hash = ?,
+           email_verified = 0, otp_hash = ?, otp_expires_at = ?, otp_attempts = 0 WHERE id = ?`
         ).run(fullName, username, whatsappVal, farmName, passwordHash, otpHash, expiresAt, existingByEmail.id);
       } else {
         db.prepare(
@@ -402,11 +499,8 @@ const server = http.createServer(async (req, res) => {
         email,
         message: `Kode OTP 6 digit telah dikirim ke ${email}. Silakan cek kotak masuk atau folder spam.`,
       });
-    } catch (err) {
-      return sendJson(res, 400, {
-        ok: false,
-        message: err.message === 'Invalid JSON' ? 'Format data tidak valid.' : 'Gagal mendaftarkan akun.',
-      });
+    } catch {
+      return sendJson(res, 400, { ok: false, message: 'Gagal mendaftarkan akun.' });
     }
   }
 
@@ -416,43 +510,34 @@ const server = http.createServer(async (req, res) => {
       const body = await readRequestBody(req);
       const email = normalizeIdentifier(body.email);
       const otp = String(body.otp || '').trim();
-
       if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Alamat email tidak valid.' });
-      if (!/^\d{6}$/.test(otp)) {
-        return sendJson(res, 400, { ok: false, message: 'Mohon masukkan 6 digit kode OTP angka.' });
-      }
+      if (!/^\d{6}$/.test(otp)) return sendJson(res, 400, { ok: false, message: 'Mohon masukkan 6 digit kode OTP angka.' });
 
       const user = db
         .prepare('SELECT id, full_name, email, username, farm_name, email_verified, otp_hash, otp_expires_at, otp_attempts FROM users WHERE LOWER(email) = ?')
         .get(email);
-      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun dengan email tersebut tidak ditemukan.' });
-
+      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
       if (user.email_verified) {
-        const token = createSessionToken(user);
         return sendJson(res, 200, {
           ok: true,
-          token,
+          token: createSessionToken(user),
           message: 'Email sudah terverifikasi sebelumnya.',
           user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, emailVerified: true },
         });
       }
-
-      if ((user.otp_attempts || 0) >= 5) {
-        return sendJson(res, 429, { ok: false, message: 'Terlalu banyak percobaan OTP salah. Silakan tekan Kirim Ulang OTP.' });
-      }
+      if ((user.otp_attempts || 0) >= 5) return sendJson(res, 429, { ok: false, message: 'Terlalu banyak percobaan OTP salah.' });
       if (!user.otp_hash || !user.otp_expires_at || new Date(user.otp_expires_at) < new Date()) {
-        return sendJson(res, 400, { ok: false, message: 'Kode OTP sudah kedaluwarsa. Silakan tekan Kirim Ulang OTP.' });
+        return sendJson(res, 400, { ok: false, message: 'Kode OTP sudah kedaluwarsa.' });
       }
       if (!verifyPassword(otp, user.otp_hash)) {
         db.prepare('UPDATE users SET otp_attempts = COALESCE(otp_attempts, 0) + 1 WHERE id = ?').run(user.id);
-        return sendJson(res, 400, { ok: false, message: 'Kode OTP salah. Silakan periksa kembali email Anda.' });
+        return sendJson(res, 400, { ok: false, message: 'Kode OTP salah.' });
       }
 
       db.prepare('UPDATE users SET email_verified = 1, otp_hash = NULL, otp_expires_at = NULL, otp_attempts = 0 WHERE id = ?').run(user.id);
-      const token = createSessionToken(user);
       return sendJson(res, 200, {
         ok: true,
-        token,
+        token: createSessionToken(user),
         message: 'Email berhasil diverifikasi! Membuka Dashboard...',
         user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, emailVerified: true },
       });
@@ -467,10 +552,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readRequestBody(req);
       const email = normalizeIdentifier(body.email);
       if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Alamat email tidak valid.' });
-
       const user = db.prepare('SELECT id, full_name, email, email_verified FROM users WHERE LOWER(email) = ?').get(email);
-      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun dengan email tersebut tidak ditemukan.' });
-      if (user.email_verified) return sendJson(res, 400, { ok: false, message: 'Email ini sudah terverifikasi. Silakan masuk.' });
+      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
+      if (user.email_verified) return sendJson(res, 400, { ok: false, message: 'Email ini sudah terverifikasi.' });
 
       const otp = generateOtpCode();
       const otpHash = hashPassword(otp);
@@ -481,19 +565,18 @@ const server = http.createServer(async (req, res) => {
       db.prepare('UPDATE users SET otp_hash = ?, otp_expires_at = ?, otp_attempts = 0 WHERE id = ?').run(otpHash, expiresAt, user.id);
       return sendJson(res, 200, { ok: true, message: `Kode OTP baru telah dikirim ke ${user.email}.` });
     } catch {
-      return sendJson(res, 400, { ok: false, message: 'Permintaan kirim ulang OTP tidak valid.' });
+      return sendJson(res, 400, { ok: false, message: 'Gagal mengirim ulang OTP.' });
     }
   }
 
-  // API: Forgot Password (Send Reset OTP)
+  // API: Forgot Password & Reset Password
   if (req.method === 'POST' && pathname === '/api/forgot-password') {
     try {
       const body = await readRequestBody(req);
       const email = normalizeIdentifier(body.email);
-      if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Mohon masukkan alamat email yang valid.' });
-
+      if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Alamat email tidak valid.' });
       const user = db.prepare('SELECT id, full_name, email FROM users WHERE LOWER(email) = ?').get(email);
-      if (!user) return sendJson(res, 404, { ok: false, message: 'Email tersebut belum terdaftar di sistem.' });
+      if (!user) return sendJson(res, 404, { ok: false, message: 'Email tersebut belum terdaftar.' });
 
       const otp = generateOtpCode();
       const otpHash = hashPassword(otp);
@@ -502,35 +585,32 @@ const server = http.createServer(async (req, res) => {
       if (!mailResult.ok) return sendJson(res, mailResult.status || 502, { ok: false, message: mailResult.message });
 
       db.prepare('UPDATE users SET otp_hash = ?, otp_expires_at = ?, otp_attempts = 0 WHERE id = ?').run(otpHash, expiresAt, user.id);
-      return sendJson(res, 200, { ok: true, email: user.email, message: `Kode OTP reset kata sandi telah dikirim ke ${user.email}.` });
+      return sendJson(res, 200, { ok: true, email: user.email, message: `Kode OTP reset sandi telah dikirim ke ${user.email}.` });
     } catch {
-      return sendJson(res, 400, { ok: false, message: 'Permintaan reset sandi tidak valid.' });
+      return sendJson(res, 400, { ok: false, message: 'Gagal memproses lupa kata sandi.' });
     }
   }
 
-  // API: Reset Password with OTP
   if (req.method === 'POST' && pathname === '/api/reset-password') {
     try {
       const body = await readRequestBody(req);
       const email = normalizeIdentifier(body.email);
       const otp = String(body.otp || '').trim();
       const newPassword = String(body.newPassword || '');
-
       if (!isValidEmail(email)) return sendJson(res, 400, { ok: false, message: 'Alamat email tidak valid.' });
-      if (!/^\d{6}$/.test(otp)) return sendJson(res, 400, { ok: false, message: 'Mohon masukkan 6 digit kode OTP angka.' });
-      if (newPassword.length < 6) return sendJson(res, 400, { ok: false, message: 'Kata sandi baru minimal harus 6 karakter.' });
+      if (!/^\d{6}$/.test(otp)) return sendJson(res, 400, { ok: false, message: 'Kode OTP harus 6 digit angka.' });
+      if (newPassword.length < 6) return sendJson(res, 400, { ok: false, message: 'Kata sandi baru minimal 6 karakter.' });
 
       const user = db.prepare('SELECT id, otp_hash, otp_expires_at, otp_attempts FROM users WHERE LOWER(email) = ?').get(email);
-      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun dengan email tersebut tidak ditemukan.' });
-      if ((user.otp_attempts || 0) >= 5) return sendJson(res, 429, { ok: false, message: 'Terlalu banyak percobaan OTP salah. Silakan minta kode baru.' });
+      if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
+      if ((user.otp_attempts || 0) >= 5) return sendJson(res, 429, { ok: false, message: 'Terlalu banyak percobaan OTP salah.' });
       if (!user.otp_hash || !user.otp_expires_at || new Date(user.otp_expires_at) < new Date()) {
-        return sendJson(res, 400, { ok: false, message: 'Kode OTP sudah kedaluwarsa. Silakan minta kode baru.' });
+        return sendJson(res, 400, { ok: false, message: 'Kode OTP sudah kedaluwarsa.' });
       }
       if (!verifyPassword(otp, user.otp_hash)) {
         db.prepare('UPDATE users SET otp_attempts = COALESCE(otp_attempts, 0) + 1 WHERE id = ?').run(user.id);
-        return sendJson(res, 400, { ok: false, message: 'Kode OTP salah. Silakan periksa kembali email Anda.' });
+        return sendJson(res, 400, { ok: false, message: 'Kode OTP salah.' });
       }
-
       db.prepare('UPDATE users SET password_hash = ?, email_verified = 1, otp_hash = NULL, otp_expires_at = NULL, otp_attempts = 0 WHERE id = ?').run(hashPassword(newPassword), user.id);
       return sendJson(res, 200, { ok: true, message: 'Kata sandi baru berhasil disimpan! Silakan masuk.' });
     } catch {
@@ -544,9 +624,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readRequestBody(req);
       const identifier = normalizeIdentifier(body.username);
       const password = String(body.password || '');
-      if (!identifier || !password) {
-        return sendJson(res, 400, { ok: false, message: 'Mohon isi Email/WhatsApp/Username dan Kata Sandi terlebih dahulu.' });
-      }
+      if (!identifier || !password) return sendJson(res, 400, { ok: false, message: 'Mohon isi Email/Username dan Kata Sandi.' });
 
       const user = db
         .prepare(
@@ -560,18 +638,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { ok: false, message: 'Email/Username atau Kata Sandi salah.' });
       }
       if (user.email && !user.email_verified) {
-        return sendJson(res, 403, {
-          ok: false,
-          needsVerification: true,
-          email: user.email,
-          message: 'Email Anda belum diverifikasi. Silakan masukkan kode OTP yang dikirim ke email Anda.',
-        });
+        return sendJson(res, 403, { ok: false, needsVerification: true, email: user.email, message: 'Email Anda belum diverifikasi.' });
       }
-
-      const token = createSessionToken(user);
       return sendJson(res, 200, {
         ok: true,
-        token,
+        token: createSessionToken(user),
         message: 'Berhasil masuk.',
         user: {
           id: user.id,
@@ -587,7 +658,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // API: Current User Session (/api/me)
+  // API: Current User (/api/me)
   if (req.method === 'GET' && pathname === '/api/me') {
     const auth = requireAuth(req);
     if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
@@ -606,10 +677,56 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // API: Dashboard State (GET /api/dashboard)
+  // API: Profile Update (PATCH /api/profile)
+  if (req.method === 'PATCH' && pathname === '/api/profile') {
+    const auth = requireAuth(req);
+    if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
+    const body = await readRequestBody(req);
+    const fullName = String(body.fullName || '').trim();
+    const farmName = String(body.farmName || '').trim() || 'Pemilik Lahan';
+    const currentPassword = String(body.currentPassword || '');
+    const newPassword = String(body.newPassword || '');
+    if (!fullName) return sendJson(res, 400, { ok: false, message: 'Nama Lengkap tidak boleh kosong.' });
+
+    const user = db.prepare('SELECT id, full_name, email, username, farm_name, password_hash, email_verified FROM users WHERE id = ?').get(auth.uid);
+    if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
+
+    let nextPasswordHash = user.password_hash;
+    let passwordChanged = false;
+    if (newPassword || currentPassword) {
+      if (!currentPassword) return sendJson(res, 400, { ok: false, message: 'Masukkan kata sandi saat ini.' });
+      if (!verifyPassword(currentPassword, user.password_hash)) return sendJson(res, 400, { ok: false, message: 'Kata sandi saat ini salah.' });
+      if (newPassword.length < 6) return sendJson(res, 400, { ok: false, message: 'Kata sandi baru minimal 6 karakter.' });
+      nextPasswordHash = hashPassword(newPassword);
+      passwordChanged = true;
+    }
+
+    db.prepare('UPDATE users SET full_name = ?, farm_name = ?, password_hash = ? WHERE id = ?').run(fullName, farmName, nextPasswordHash, auth.uid);
+    addActivityLog(auth.uid, {
+      title: passwordChanged ? 'Profil & Kata Sandi Diperbarui' : 'Profil Lahan Diperbarui',
+      subtitle: `${fullName} (${farmName}) • ${formatCurrentTimeWib()}`,
+      tag: 'Profil',
+      tone: 'purple',
+    });
+
+    return sendJson(res, 200, {
+      ok: true,
+      message: passwordChanged ? 'Profil dan kata sandi berhasil diperbarui!' : 'Profil berhasil disimpan!',
+      user: {
+        id: user.id,
+        fullName,
+        email: user.email || null,
+        username: user.username,
+        farmName,
+        emailVerified: Boolean(user.email_verified),
+      },
+    });
+  }
+
+  // API: Dashboard Snapshot (GET /api/dashboard)
   if (req.method === 'GET' && pathname === '/api/dashboard') {
     const auth = requireAuth(req);
-    if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid. Silakan masuk terlebih dahulu.' });
+    if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
     const user = db.prepare('SELECT id, full_name, email, username, farm_name, email_verified FROM users WHERE id = ?').get(auth.uid);
     if (!user) return sendJson(res, 401, { ok: false, message: 'Akun tidak ditemukan.' });
     return sendJson(res, 200, {
@@ -626,7 +743,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // API: Pump & Settings Update (POST /api/pump)
+  // API: Pump, Tank, Energy, Location & Live Sync (POST /api/pump)
   if (req.method === 'POST' && pathname === '/api/pump') {
     const auth = requireAuth(req);
     if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
@@ -646,15 +763,51 @@ const server = http.createServer(async (req, res) => {
       typeof body.locationName === 'string' && body.locationName.trim() ? body.locationName.trim() : cur.location_name;
     const latitude = Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : cur.latitude;
     const longitude = Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : cur.longitude;
+    let tankLevelPct = Number.isFinite(Number(body.tankLevelPct))
+      ? Math.max(0, Math.min(100, Math.round(Number(body.tankLevelPct))))
+      : cur.tank_level_pct;
+    if (body.refillTank === true) tankLevelPct = 100;
+    const waterUsedLiters = Number.isFinite(Number(body.waterUsedLiters))
+      ? Math.max(0, Math.round(Number(body.waterUsedLiters)))
+      : cur.water_used_liters;
+    const waterSavedLiters = Number.isFinite(Number(body.waterSavedLiters))
+      ? Math.max(0, Math.round(Number(body.waterSavedLiters)))
+      : cur.water_saved_liters;
+    const energyKwh = Number.isFinite(Number(body.energyKwh))
+      ? Math.max(0, Number(Number(body.energyKwh).toFixed(2)))
+      : cur.energy_kwh;
 
     db.prepare(
       `UPDATE user_settings
-       SET is_pump_on = ?, pump_mode = ?, min_moisture = ?, max_moisture = ?, location_name = ?, latitude = ?, longitude = ?, updated_at = datetime('now', 'localtime')
+       SET is_pump_on = ?, pump_mode = ?, min_moisture = ?, max_moisture = ?,
+           location_name = ?, latitude = ?, longitude = ?,
+           tank_level_pct = ?, water_used_liters = ?, water_saved_liters = ?, energy_kwh = ?,
+           updated_at = datetime('now', 'localtime')
        WHERE user_id = ?`
-    ).run(isPumpOn, pumpMode, minMoisture, maxMoisture, locationName, latitude, longitude, auth.uid);
+    ).run(isPumpOn, pumpMode, minMoisture, maxMoisture, locationName, latitude, longitude, tankLevelPct, waterUsedLiters, waterSavedLiters, energyKwh, auth.uid);
+
+    if (Array.isArray(body.plotUpdates)) {
+      const updPlot = db.prepare(
+        `UPDATE plots SET moisture = ?, pump_on = ?, updated_label = 'Baru saja', updated_at = datetime('now', 'localtime') WHERE id = ? AND user_id = ?`
+      );
+      for (const pu of body.plotUpdates) {
+        const pid = Number(pu.id);
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        updPlot.run(Math.max(10, Math.min(99, Math.round(Number(pu.moisture ?? 65)))), pu.pumpOn ? 1 : 0, pid, auth.uid);
+      }
+    }
 
     const timeLabel = formatCurrentTimeWib();
-    if (body.logAction === 'pump-toggle') {
+    if (body.refillTank === true) {
+      addActivityLog(auth.uid, { title: 'Pengisian Tandon Air Selesai (100%)', subtitle: `Tandon Utama • ${timeLabel}`, tag: 'Penuh', tone: 'blue' });
+    } else if (body.customLog && body.customLog.title) {
+      addActivityLog(auth.uid, {
+        title: String(body.customLog.title).slice(0, 120),
+        subtitle: String(body.customLog.subtitle || `Sistem Otomatis • ${timeLabel}`).slice(0, 120),
+        tag: String(body.customLog.tag || 'Otomatis').slice(0, 24),
+        tone: body.customLog.tone || 'green',
+      });
+    } else if (body.logAction === 'pump-toggle') {
       addActivityLog(auth.uid, {
         title: isPumpOn ? 'Pompa Utama Dinyalakan Manual' : 'Pompa Utama Dimatikan Manual',
         subtitle: `Mesin Utama • ${timeLabel}`,
@@ -669,19 +822,9 @@ const server = http.createServer(async (req, res) => {
         tone: 'purple',
       });
     } else if (body.logAction === 'location-change') {
-      addActivityLog(auth.uid, {
-        title: 'Lokasi Cuaca Diperbarui',
-        subtitle: `${locationName} • ${timeLabel}`,
-        tag: 'Cuaca',
-        tone: 'blue',
-      });
+      addActivityLog(auth.uid, { title: 'Lokasi Cuaca Diperbarui', subtitle: `${locationName} • ${timeLabel}`, tag: 'Cuaca', tone: 'blue' });
     } else if (body.logAction === 'threshold-change') {
-      addActivityLog(auth.uid, {
-        title: `Batas Kelembapan Diatur (${minMoisture}%–${maxMoisture}%)`,
-        subtitle: `Sensor Tanah • ${timeLabel}`,
-        tag: 'Pengaturan',
-        tone: 'amber',
-      });
+      addActivityLog(auth.uid, { title: `Batas Kelembapan Diatur (${minMoisture}%–${maxMoisture}%)`, subtitle: `Sensor Tanah • ${timeLabel}`, tag: 'Pengaturan', tone: 'amber' });
     }
 
     return sendJson(res, 200, { ok: true, ...getDashboardSnapshot(auth.uid) });
@@ -701,19 +844,9 @@ const server = http.createServer(async (req, res) => {
       const moisture = Math.max(10, Math.min(99, Math.round(Number(body.moisture ?? 65))));
       if (!name || !crop) return sendJson(res, 400, { ok: false, message: 'Nama Petak dan Jenis Tanaman wajib diisi.' });
       db.prepare('INSERT INTO plots (user_id, code, name, crop, moisture, pump_on, updated_label) VALUES (?, ?, ?, ?, ?, 0, ?)').run(
-        auth.uid,
-        computePlotCode(name),
-        name,
-        crop,
-        moisture,
-        'Baru saja'
+        auth.uid, computePlotCode(name), name, crop, moisture, 'Baru saja'
       );
-      addActivityLog(auth.uid, {
-        title: `Petak Baru Ditambahkan: ${name}`,
-        subtitle: `Tanaman ${crop} • ${timeLabel}`,
-        tag: 'Petak Baru',
-        tone: 'green',
-      });
+      addActivityLog(auth.uid, { title: `Petak Baru Ditambahkan: ${name}`, subtitle: `Tanaman ${crop} • ${timeLabel}`, tag: 'Petak Baru', tone: 'green' });
       return sendJson(res, 201, { ok: true, ...getDashboardSnapshot(auth.uid) });
     }
 
@@ -730,19 +863,9 @@ const server = http.createServer(async (req, res) => {
       ).run(computePlotCode(name), name, crop, moisture, pumpOn, plotId, auth.uid);
 
       if (typeof body.pumpOn === 'boolean' && pumpOn !== cur.pump_on) {
-        addActivityLog(auth.uid, {
-          title: pumpOn ? `Menyiram ${name}` : `Penyiraman ${name} Dihentikan`,
-          subtitle: `${crop} • ${timeLabel}`,
-          tag: pumpOn ? 'Aktif' : 'Selesai',
-          tone: pumpOn ? 'green' : 'blue',
-        });
+        addActivityLog(auth.uid, { title: pumpOn ? `Menyiram ${name}` : `Penyiraman ${name} Dihentikan`, subtitle: `${crop} • ${timeLabel}`, tag: pumpOn ? 'Aktif' : 'Selesai', tone: pumpOn ? 'green' : 'blue' });
       } else if (body.name || body.crop || body.moisture !== undefined) {
-        addActivityLog(auth.uid, {
-          title: `Data ${name} Diperbarui`,
-          subtitle: `${crop} (${moisture}%) • ${timeLabel}`,
-          tag: 'Diperbarui',
-          tone: 'amber',
-        });
+        addActivityLog(auth.uid, { title: `Data ${name} Diperbarui`, subtitle: `${crop} (${moisture}%) • ${timeLabel}`, tag: 'Diperbarui', tone: 'amber' });
       }
       return sendJson(res, 200, { ok: true, ...getDashboardSnapshot(auth.uid) });
     }
@@ -754,17 +877,57 @@ const server = http.createServer(async (req, res) => {
       const cur = db.prepare('SELECT name FROM plots WHERE id = ? AND user_id = ?').get(plotId, auth.uid);
       if (!cur) return sendJson(res, 404, { ok: false, message: 'Petak tidak ditemukan.' });
       db.prepare('DELETE FROM plots WHERE id = ? AND user_id = ?').run(plotId, auth.uid);
-      addActivityLog(auth.uid, {
-        title: `Petak Dihapus: ${cur.name}`,
-        subtitle: `Manajemen Lahan • ${timeLabel}`,
-        tag: 'Dihapus',
-        tone: 'purple',
-      });
+      addActivityLog(auth.uid, { title: `Petak Dihapus: ${cur.name}`, subtitle: `Manajemen Lahan • ${timeLabel}`, tag: 'Dihapus', tone: 'purple' });
       return sendJson(res, 200, { ok: true, ...getDashboardSnapshot(auth.uid) });
     }
   }
 
-  // API: List registered user accounts (safe fields only)
+  // API: Schedules CRUD (/api/schedules)
+  if (pathname === '/api/schedules' && ['POST', 'PATCH', 'DELETE'].includes(req.method)) {
+    const auth = requireAuth(req);
+    if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
+    const body = await readRequestBody(req);
+    ensureUserDashboardSeeded(auth.uid);
+    const timeLabel = formatCurrentTimeWib();
+
+    if (req.method === 'POST') {
+      const label = String(body.label || '').trim();
+      const plotTarget = String(body.plotTarget || 'Semua Petak').trim() || 'Semua Petak';
+      const timeWib = String(body.timeWib || '').trim();
+      const durationMin = Math.max(5, Math.min(120, Math.round(Number(body.durationMin || 15))));
+      const skipOnRain = body.skipOnRain !== false ? 1 : 0;
+      if (!label || !/^\d{2}:\d{2}$/.test(timeWib)) {
+        return sendJson(res, 400, { ok: false, message: 'Nama jadwal dan jam penyiraman (HH:MM) wajib diisi.' });
+      }
+      db.prepare(
+        'INSERT INTO schedules (user_id, label, plot_target, time_wib, duration_min, skip_on_rain, enabled) VALUES (?, ?, ?, ?, ?, ?, 1)'
+      ).run(auth.uid, label, plotTarget, timeWib, durationMin, skipOnRain);
+      addActivityLog(auth.uid, { title: `Jadwal Baru: ${label}`, subtitle: `${plotTarget} • ${timeWib} WIB (${durationMin} mnt)`, tag: 'Terjadwal', tone: 'blue' });
+      return sendJson(res, 201, { ok: true, ...getDashboardSnapshot(auth.uid) });
+    }
+
+    if (req.method === 'PATCH') {
+      const id = Number(body.id);
+      const cur = db.prepare('SELECT * FROM schedules WHERE id = ? AND user_id = ?').get(id, auth.uid);
+      if (!cur) return sendJson(res, 404, { ok: false, message: 'Jadwal tidak ditemukan.' });
+      const enabled = typeof body.enabled === 'boolean' ? (body.enabled ? 1 : 0) : cur.enabled;
+      const skipOnRain = typeof body.skipOnRain === 'boolean' ? (body.skipOnRain ? 1 : 0) : cur.skip_on_rain;
+      db.prepare('UPDATE schedules SET enabled = ?, skip_on_rain = ? WHERE id = ? AND user_id = ?').run(enabled, skipOnRain, id, auth.uid);
+      addActivityLog(auth.uid, { title: `Jadwal ${cur.label} ${enabled ? 'Diaktifkan' : 'Dinonaktifkan'}`, subtitle: `Pukul ${cur.time_wib} WIB • ${timeLabel}`, tag: enabled ? 'Aktif' : 'Nonaktif', tone: enabled ? 'green' : 'purple' });
+      return sendJson(res, 200, { ok: true, ...getDashboardSnapshot(auth.uid) });
+    }
+
+    if (req.method === 'DELETE') {
+      const id = Number(body.id);
+      const cur = db.prepare('SELECT label FROM schedules WHERE id = ? AND user_id = ?').get(id, auth.uid);
+      if (!cur) return sendJson(res, 404, { ok: false, message: 'Jadwal tidak ditemukan.' });
+      db.prepare('DELETE FROM schedules WHERE id = ? AND user_id = ?').run(id, auth.uid);
+      addActivityLog(auth.uid, { title: `Jadwal Dihapus: ${cur.label}`, subtitle: `Kontrol Irigasi • ${timeLabel}`, tag: 'Dihapus', tone: 'purple' });
+      return sendJson(res, 200, { ok: true, ...getDashboardSnapshot(auth.uid) });
+    }
+  }
+
+  // API: Users list
   if (req.method === 'GET' && pathname === '/api/users') {
     const users = db
       .prepare('SELECT id, full_name, email, username, whatsapp, farm_name, email_verified, created_at FROM users ORDER BY id ASC')

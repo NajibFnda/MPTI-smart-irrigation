@@ -221,18 +221,9 @@
                 <h3 class="text-sm font-bold text-slate-900">Pemberitahuan Lahan</h3>
                 <button id="notif-clear-btn" type="button" class="text-xs font-semibold text-brand-600 hover:underline">Tandai dibaca</button>
               </div>
-              <ul class="space-y-2.5 text-xs">
-                <li class="p-2.5 rounded-xl bg-brand-50 border border-brand-100 text-slate-700">
-                  <p class="font-semibold text-slate-900">Greenhouse 1 sedang disiram</p>
-                  <p class="text-slate-500 mt-0.5">Kelembapan turun ke 42%, pompa menyala otomatis.</p>
-                </li>
-                <li class="p-2.5 rounded-xl bg-amber-50 border border-amber-100 text-slate-700">
-                  <p class="font-semibold text-slate-900">Peluang Hujan 70% siang ini</p>
-                  <p class="text-slate-500 mt-0.5">Jadwal penyiraman pukul 13:00 WIB ditunda hemat air.</p>
-                </li>
-                <li class="p-2.5 rounded-xl bg-sky-50 border border-sky-100 text-slate-700">
-                  <p class="font-semibold text-slate-900">Tandon air aman (85% penuh)</p>
-                  <p class="text-slate-500 mt-0.5">Kapasitas cukup untuk penyiraman 2 hari ke depan.</p>
+              <ul id="notif-list" class="space-y-2.5 text-xs">
+                <li class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-500">
+                  Memuat pemberitahuan lahan...
                 </li>
               </ul>
             </div>
@@ -330,18 +321,23 @@
 
             <!-- Card 2 (Soft Blue): Sisa Air Tandon -->
             <article class="rounded-2xl bg-[#EEF6FD] border border-[#DCEBFA] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
-              <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center justify-between gap-2 mb-3.5">
                 <div class="w-10 h-10 rounded-xl bg-[#DCEDFB] text-sky-700 flex items-center justify-center" aria-hidden="true">
                   <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
                   </svg>
                 </div>
-                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-sky-700 border border-[#CFE4F7]">1.700 Liter</span>
+                <div class="flex items-center gap-1.5">
+                  <span id="card-tank-liters" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-sky-700 border border-[#CFE4F7]">1.700 Liter</span>
+                  <button type="button" id="btn-refill-tank" title="Isi tandon hingga 100%" class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-600 hover:bg-sky-700 text-white transition-colors">
+                    Isi
+                  </button>
+                </div>
               </div>
               <div>
                 <p class="text-[13px] font-medium text-slate-600">Sisa Air Tandon</p>
                 <p id="card-tank-value" class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">85% Penuh</p>
-                <p class="text-[12.5px] font-medium text-sky-700 mt-2">Aman dari meluber</p>
+                <p id="card-tank-subtext" class="text-[12.5px] font-medium text-sky-700 mt-2">Aman dari meluber</p>
               </div>
             </article>
 
@@ -353,12 +349,12 @@
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                   </svg>
                 </div>
-                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-amber-700 border border-[#F5E1B0]">Hemat 12%</span>
+                <span id="card-energy-kwh" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-amber-700 border border-[#F5E1B0]">22,1 kWh</span>
               </div>
               <div>
                 <p class="text-[13px] font-medium text-slate-600">Pemakaian Listrik</p>
-                <p class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">Rp 32.000</p>
-                <p class="text-[12.5px] font-medium text-amber-700 mt-2">Estimasi bulan ini</p>
+                <p id="card-energy-cost" class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">Rp 31.935</p>
+                <p id="card-energy-subtext" class="text-[12.5px] font-medium text-amber-700 mt-2">Estimasi bulan ini</p>
               </div>
             </article>
 
@@ -427,11 +423,11 @@
                   <div class="flex items-center gap-5 mt-2">
                     <div class="flex items-center gap-2 text-[13px] font-medium text-slate-600">
                       <span class="w-2.5 h-2.5 rounded-full bg-[#1B6B3A]"></span>
-                      <span>Petak Utara</span>
+                      <span id="chart-legend-a">Petak Utara</span>
                     </div>
                     <div class="flex items-center gap-2 text-[13px] font-medium text-slate-600">
                       <span class="w-2.5 h-2.5 rounded-full bg-[#84CC4A]"></span>
-                      <span>Petak Selatan</span>
+                      <span id="chart-legend-b">Petak Selatan</span>
                     </div>
                   </div>
                 </div>
@@ -455,16 +451,16 @@
                 </svg>
 
                 <!-- Interactive Floating Tooltip -->
-                <div id="chart-tooltip" class="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 bg-white border border-slate-200/90 rounded-xl shadow-lg px-3.5 py-2.5 text-[12px] transition-all duration-150 z-10 min-w-[180px]">
-                  <p id="tooltip-day" class="font-bold text-slate-800 mb-1">Kam, 12 Nov</p>
+                <div id="chart-tooltip" class="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 bg-white border border-slate-200/90 rounded-xl shadow-lg px-3.5 py-2.5 text-[12px] transition-all duration-150 z-10 min-w-[190px]">
+                  <p id="tooltip-day" class="font-bold text-slate-800 mb-1">--</p>
                   <div class="flex items-center justify-between gap-3">
                     <span class="flex items-center gap-1.5 text-slate-600">
                       <span class="w-2 h-2 rounded-full bg-[#1B6B3A]"></span>
-                      Utara: <strong id="tooltip-utara" class="text-slate-900">68%</strong>
+                      <span id="tooltip-label-a">Petak 1</span>: <strong id="tooltip-utara" class="text-slate-900">--%</strong>
                     </span>
                     <span class="flex items-center gap-1.5 text-slate-600">
                       <span class="w-2 h-2 rounded-full bg-[#84CC4A]"></span>
-                      Selatan: <strong id="tooltip-selatan" class="text-slate-900">54%</strong>
+                      <span id="tooltip-label-b">Petak 2</span>: <strong id="tooltip-selatan" class="text-slate-900">--%</strong>
                     </span>
                   </div>
                 </div>
