@@ -302,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM refs: Summary Cards
   const cardSoilValue = document.getElementById('card-soil-value');
   const cardSoilSubtext = document.getElementById('card-soil-subtext');
+  const btnResetSoil = document.getElementById('btn-reset-soil');
   const cardTankLiters = document.getElementById('card-tank-liters');
   const cardTankValue = document.getElementById('card-tank-value');
   const cardTankSubtext = document.getElementById('card-tank-subtext');
@@ -309,6 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const cardEnergyKwh = document.getElementById('card-energy-kwh');
   const cardEnergyCost = document.getElementById('card-energy-cost');
   const cardEnergySubtext = document.getElementById('card-energy-subtext');
+  const btnResetEnergy = document.getElementById('btn-reset-energy');
 
   const pumpSwitch = document.getElementById('pump-switch');
   const pumpSwitchKnob = document.getElementById('pump-switch-knob');
@@ -734,6 +736,35 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Gagal menghapus petak.', 'error');
     }
   }
+
+  async function handleResetSoil() {
+    if (!window.confirm('Reset kelembapan semua petak ke 65% (normal) dan hentikan penyiraman aktif?')) {
+      return;
+    }
+    rainDelayLogged = false;
+    simActiveTicks = 0;
+    await persistSettings(
+      { resetSoil: true, resetMoistureValue: 65 },
+      'Kelembapan semua petak berhasil direset ke 65% (normal).'
+    );
+  }
+
+  async function handleResetEnergy() {
+    if (state.energyKwh <= 0) {
+      showToast('Pemakaian listrik sudah 0,0 kWh (Rp 0).', 'info');
+      return;
+    }
+    if (!window.confirm('Reset pemakaian listrik menjadi 0,0 kWh (Rp 0)?')) {
+      return;
+    }
+    await persistSettings(
+      { resetEnergy: true },
+      'Pemakaian listrik berhasil direset ke 0,0 kWh (Rp 0).'
+    );
+  }
+
+  btnResetSoil?.addEventListener('click', handleResetSoil);
+  btnResetEnergy?.addEventListener('click', handleResetEnergy);
 
   btnRefillTank?.addEventListener('click', async () => {
     if (state.tankLevelPct >= 100) {
@@ -2129,10 +2160,19 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-xs font-semibold">Email Terdaftar</span><span class="text-xs font-bold text-brand-700 truncate max-w-[140px]">${escapeHtml(activeUser.email || 'Belum diisi')}</span></div>
           <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-xs font-semibold">Total Petak Aktif</span><span class="text-xs font-bold text-brand-700">${state.plots.length} Petak</span></div>
           <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-xs font-semibold">Jadwal Aktif</span><span class="text-xs font-bold text-brand-700">${state.schedules.filter((s) => s.enabled).length} Jadwal</span></div>
+          <div class="p-3.5 rounded-xl bg-[#FEF9EA] border border-[#F8EED0] space-y-2.5">
+            <p class="text-xs font-semibold text-amber-800">Reset Cepat Data Sensor &amp; Listrik</p>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" id="settings-reset-energy" class="px-3 py-1.5 rounded-lg bg-white text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-50">Reset Listrik (0 kWh)</button>
+              <button type="button" id="settings-reset-soil" class="px-3 py-1.5 rounded-lg bg-white text-brand-700 text-xs font-bold border border-brand-200 hover:bg-brand-50">Reset Kelembapan (65%)</button>
+            </div>
+          </div>
         </div>
       `;
 
       document.getElementById('settings-change-loc')?.addEventListener('click', openLocationModal);
+      document.getElementById('settings-reset-energy')?.addEventListener('click', handleResetEnergy);
+      document.getElementById('settings-reset-soil')?.addEventListener('click', handleResetSoil);
       document.getElementById('form-edit-profile')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fullName = document.getElementById('prof-fullname')?.value.trim() || '';

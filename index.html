@@ -325,7 +325,7 @@
 
             <!-- Card 1 (Soft Green): Kondisi Tanah -->
             <article class="rounded-2xl bg-[#EFF8F1] border border-[#E1EFE4] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
-              <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center justify-between gap-2 mb-3.5">
                 <div class="w-10 h-10 rounded-xl bg-[#DDF1E1] text-brand-700 flex items-center justify-center" aria-hidden="true">
                   <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M7 20h10"></path>
@@ -334,7 +334,12 @@
                     <path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"></path>
                   </svg>
                 </div>
-                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-brand-700 border border-[#D3EBD8]">Sensor Aktif</span>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-brand-700 border border-[#D3EBD8]">Sensor Aktif</span>
+                  <button type="button" id="btn-reset-soil" title="Reset kelembapan semua petak ke normal (65%)" class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                    Reset
+                  </button>
+                </div>
               </div>
               <div>
                 <p class="text-[13px] font-medium text-slate-600">Kondisi Tanah</p>
@@ -367,13 +372,18 @@
 
             <!-- Card 3 (Soft Yellow): Pemakaian Listrik -->
             <article class="rounded-2xl bg-[#FEF9EA] border border-[#F8EED0] p-5 flex flex-col justify-between transition-shadow hover:shadow-md">
-              <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center justify-between gap-2 mb-3.5">
                 <div class="w-10 h-10 rounded-xl bg-[#FDECC8] text-amber-700 flex items-center justify-center" aria-hidden="true">
                   <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                   </svg>
                 </div>
-                <span id="card-energy-kwh" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-amber-700 border border-[#F5E1B0]">22,1 kWh</span>
+                <div class="flex items-center gap-1.5">
+                  <span id="card-energy-kwh" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/80 text-amber-700 border border-[#F5E1B0]">22,1 kWh</span>
+                  <button type="button" id="btn-reset-energy" title="Reset pemakaian listrik ke 0,0 kWh" class="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-600 hover:bg-amber-700 text-white transition-colors">
+                    Reset
+                  </button>
+                </div>
               </div>
               <div>
                 <p class="text-[13px] font-medium text-slate-600">Pemakaian Listrik</p>

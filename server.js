@@ -824,7 +824,14 @@ const server = http.createServer(async (req, res) => {
     ensureUserDashboardSeeded(auth.uid);
     const cur = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(auth.uid);
 
-    const isPumpOn = typeof body.isPumpOn === 'boolean' ? (body.isPumpOn ? 1 : 0) : cur.is_pump_on;
+    const isPumpOn =
+      body.resetSoil === true
+        ? 0
+        : typeof body.isPumpOn === 'boolean'
+          ? body.isPumpOn
+            ? 1
+            : 0
+          : cur.is_pump_on;
     const pumpMode = body.pumpMode === 'manual' || body.pumpMode === 'otomatis' ? body.pumpMode : cur.pump_mode;
     const minMoisture = Number.isFinite(Number(body.minMoistureThreshold))
       ? Math.max(15, Math.min(70, Math.round(Number(body.minMoistureThreshold))))
@@ -846,9 +853,10 @@ const server = http.createServer(async (req, res) => {
     const waterSavedLiters = Number.isFinite(Number(body.waterSavedLiters))
       ? Math.max(0, Math.round(Number(body.waterSavedLiters)))
       : cur.water_saved_liters;
-    const energyKwh = Number.isFinite(Number(body.energyKwh))
+    let energyKwh = Number.isFinite(Number(body.energyKwh))
       ? Math.max(0, Number(Number(body.energyKwh).toFixed(2)))
       : cur.energy_kwh;
+    if (body.resetEnergy === true) energyKwh = 0;
 
     db.prepare(
       `UPDATE user_settings
@@ -859,7 +867,14 @@ const server = http.createServer(async (req, res) => {
        WHERE user_id = ?`
     ).run(isPumpOn, pumpMode, minMoisture, maxMoisture, locationName, latitude, longitude, tankLevelPct, waterUsedLiters, waterSavedLiters, energyKwh, auth.uid);
 
-    if (Array.isArray(body.plotUpdates)) {
+    if (body.resetSoil === true) {
+      const targetMoisture = Number.isFinite(Number(body.resetMoistureValue))
+        ? Math.max(20, Math.min(90, Math.round(Number(body.resetMoistureValue))))
+        : 65;
+      db.prepare(
+        `UPDATE plots SET moisture = ?, pump_on = 0, updated_label = 'Baru saja', updated_at = datetime('now', 'localtime') WHERE user_id = ?`
+      ).run(targetMoisture, auth.uid);
+    } else if (Array.isArray(body.plotUpdates)) {
       const updPlot = db.prepare(
         `UPDATE plots SET moisture = ?, pump_on = ?, updated_label = 'Baru saja', updated_at = datetime('now', 'localtime') WHERE id = ? AND user_id = ?`
       );
@@ -873,6 +888,13 @@ const server = http.createServer(async (req, res) => {
     const timeLabel = formatCurrentTimeWib();
     if (body.refillTank === true) {
       addActivityLog(auth.uid, { title: 'Pengisian Tandon Air Selesai (100%)', subtitle: `Tandon Utama • ${timeLabel}`, tag: 'Penuh', tone: 'blue' });
+    } else if (body.resetEnergy === true) {
+      addActivityLog(auth.uid, { title: 'Pemakaian Listrik Direset (0,0 kWh)', subtitle: `Meteran Listrik • ${timeLabel}`, tag: 'Reset', tone: 'amber' });
+    } else if (body.resetSoil === true) {
+      const targetMoisture = Number.isFinite(Number(body.resetMoistureValue))
+        ? Math.max(20, Math.min(90, Math.round(Number(body.resetMoistureValue))))
+        : 65;
+      addActivityLog(auth.uid, { title: `Kelembapan Semua Petak Direset (${targetMoisture}%)`, subtitle: `Semua Petak Lahan • ${timeLabel}`, tag: 'Reset', tone: 'green' });
     } else if (body.customLog && body.customLog.title) {
       addActivityLog(auth.uid, {
         title: String(body.customLog.title).slice(0, 120),

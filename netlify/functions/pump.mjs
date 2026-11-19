@@ -28,7 +28,12 @@ export default async (req) => {
     `;
     const cur = existingRows[0];
 
-    const isPumpOn = typeof body.isPumpOn === 'boolean' ? body.isPumpOn : Boolean(cur.is_pump_on);
+    const isPumpOn =
+      body.resetSoil === true
+        ? false
+        : typeof body.isPumpOn === 'boolean'
+          ? body.isPumpOn
+          : Boolean(cur.is_pump_on);
     const pumpMode =
       body.pumpMode === 'manual' || body.pumpMode === 'otomatis'
         ? body.pumpMode
@@ -70,9 +75,13 @@ export default async (req) => {
       ? Math.max(0, Math.round(Number(body.waterSavedLiters)))
       : Number(cur.water_saved_liters ?? 1450);
 
-    const energyKwh = Number.isFinite(Number(body.energyKwh))
+    let energyKwh = Number.isFinite(Number(body.energyKwh))
       ? Math.max(0, Number(Number(body.energyKwh).toFixed(2)))
       : Number(cur.energy_kwh ?? 22.1);
+
+    if (body.resetEnergy === true) {
+      energyKwh = 0;
+    }
 
     await db.sql`
       UPDATE user_settings
@@ -91,8 +100,20 @@ export default async (req) => {
       WHERE user_id = ${auth.uid}
     `;
 
-    // Optional batch sync of plot moisture/pump states from live auto-irrigation
-    if (Array.isArray(body.plotUpdates)) {
+    // Optional reset of all plot soil moisture to ideal normal (65%) & stop watering
+    if (body.resetSoil === true) {
+      const targetMoisture = Number.isFinite(Number(body.resetMoistureValue))
+        ? Math.max(20, Math.min(90, Math.round(Number(body.resetMoistureValue))))
+        : 65;
+      await db.sql`
+        UPDATE plots
+        SET moisture = ${targetMoisture},
+            pump_on = FALSE,
+            updated_label = 'Baru saja',
+            updated_at = NOW()
+        WHERE user_id = ${auth.uid}
+      `;
+    } else if (Array.isArray(body.plotUpdates)) {
       for (const pu of body.plotUpdates) {
         const pid = Number(pu.id);
         if (!Number.isInteger(pid) || pid <= 0) continue;
@@ -116,6 +137,23 @@ export default async (req) => {
         subtitle: `Tandon Utama • ${timeLabel}`,
         tag: 'Penuh',
         tone: 'blue',
+      });
+    } else if (body.resetEnergy === true) {
+      await addActivityLog(db, auth.uid, {
+        title: 'Pemakaian Listrik Direset (0,0 kWh)',
+        subtitle: `Meteran Listrik • ${timeLabel}`,
+        tag: 'Reset',
+        tone: 'amber',
+      });
+    } else if (body.resetSoil === true) {
+      const targetMoisture = Number.isFinite(Number(body.resetMoistureValue))
+        ? Math.max(20, Math.min(90, Math.round(Number(body.resetMoistureValue))))
+        : 65;
+      await addActivityLog(db, auth.uid, {
+        title: `Kelembapan Semua Petak Direset (${targetMoisture}%)`,
+        subtitle: `Semua Petak Lahan • ${timeLabel}`,
+        tag: 'Reset',
+        tone: 'green',
       });
     } else if (body.customLog && body.customLog.title) {
       await addActivityLog(db, auth.uid, {
