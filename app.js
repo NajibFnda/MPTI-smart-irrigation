@@ -1,19 +1,64 @@
 /**
  * Irigasi Cerdas — Dasbor Pemantauan & Kontrol Irigasi Lahan
- * Interaktivitas: jam real-time, sidebar responsif, sakelar & mode pompa,
- * grafik kelembapan tanah interaktif, notifikasi, dan unduh laporan.
+ * Terhubung penuh dengan API sesi bertoken (/api/dashboard, /api/pump, /api/plots),
+ * cuaca real-time Open-Meteo, lokasi lahan kustom, serta grafik interaktif.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   /* =========================================================================
-     0. Active User Profile & Account Menu
+     0. Auth Guard, Token Helpers & Profile UI
      ========================================================================= */
   const CURRENT_USER_KEY = 'irigasi_cerdas_current_user';
+  const TOKEN_KEY = 'irigasi_cerdas_token';
+
+  const authToken = (() => {
+    try {
+      return localStorage.getItem(TOKEN_KEY) || '';
+    } catch {
+      return '';
+    }
+  })();
+
+  if (!authToken) {
+    window.location.replace('login.html?auth=required');
+    return;
+  }
+
+  function clearSessionAndRedirect(reason = 'expired') {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(CURRENT_USER_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+    window.location.replace(`login.html?auth=${reason}`);
+  }
+
+  async function apiRequest(url, options = {}) {
+    const headers = {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${authToken}`,
+    };
+    if (options.body && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      clearSessionAndRedirect('expired');
+      throw new Error('Unauthorized');
+    }
+    const contentType = res.headers.get('content-type') || '';
+    const data = contentType.includes('application/json') ? await res.json() : {};
+    return { status: res.status, ok: res.ok, data };
+  }
+
   const headerUserName = document.getElementById('header-user-name');
   const headerUserRole = document.getElementById('header-user-role');
   const headerUserInitials = document.getElementById('header-user-initials');
   const popoverUserName = document.getElementById('popover-user-name');
   const popoverUserRole = document.getElementById('popover-user-role');
+  const popoverUserEmail = document.getElementById('popover-user-email');
   const greetingHeading = document.getElementById('greeting-heading');
   const userMenuBtn = document.getElementById('user-menu-btn');
   const userMenuPopover = document.getElementById('user-menu-popover');
@@ -27,23 +72,31 @@ document.addEventListener('DOMContentLoaded', () => {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
+  function applyUserProfile(user) {
+    if (!user?.fullName) return;
+    activeUserName = user.fullName;
+    const displayName = activeUserName;
+    const displayRole = user.farmName || 'Pemilik Lahan';
+    const initials = getInitials(displayName);
+
+    document.title = `Irigasi Cerdas — Dasbor Lahan ${displayName}`;
+    if (headerUserName) headerUserName.textContent = displayName;
+    if (headerUserRole) headerUserRole.textContent = displayRole;
+    if (headerUserInitials) headerUserInitials.textContent = initials;
+    if (popoverUserName) popoverUserName.textContent = displayName;
+    if (popoverUserRole) popoverUserRole.textContent = displayRole;
+    if (popoverUserEmail && user.email) {
+      popoverUserEmail.textContent = user.emailVerified ? `✓ ${user.email}` : user.email;
+      popoverUserEmail.classList.remove('hidden');
+    }
+    updateClock();
+  }
+
+  // Hydrate immediately from cached user while /api/dashboard loads
   try {
     const rawUser = localStorage.getItem(CURRENT_USER_KEY);
     if (rawUser) {
-      const activeUser = JSON.parse(rawUser);
-      if (activeUser?.fullName) {
-        activeUserName = activeUser.fullName;
-        const displayName = activeUserName;
-        const displayRole = activeUser.farmName || 'Pemilik Lahan';
-        const initials = getInitials(displayName);
-
-        document.title = `Irigasi Cerdas — Dasbor Lahan ${displayName}`;
-        if (headerUserName) headerUserName.textContent = displayName;
-        if (headerUserRole) headerUserRole.textContent = displayRole;
-        if (headerUserInitials) headerUserInitials.textContent = initials;
-        if (popoverUserName) popoverUserName.textContent = displayName;
-        if (popoverUserRole) popoverUserRole.textContent = displayRole;
-      }
+      applyUserProfile(JSON.parse(rawUser));
     }
   } catch {
     // Ignore storage read errors
@@ -70,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnLogout?.addEventListener('click', () => {
     try {
+      localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(CURRENT_USER_KEY);
     } catch {
       // Ignore storage errors
@@ -77,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* =========================================================================
-     1. Real-time Date & Clock (Bahasa Indonesia + WIB)
+     1. Real-time Date, Clock & Dynamic Time Greeting (WIB)
      ========================================================================= */
   const liveDateEl = document.getElementById('live-date');
   const liveClockEl = document.getElementById('live-clock');
@@ -129,14 +183,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!toastContainer) return;
     const toast = document.createElement('div');
     const colorClass =
-      variant === 'info'
-        ? 'bg-slate-800 text-white border-slate-700'
-        : 'bg-brand-700 text-white border-brand-600';
+      variant === 'error'
+        ? 'bg-rose-600 text-white border-rose-500'
+        : variant === 'info'
+          ? 'bg-slate-800 text-white border-slate-700'
+          : 'bg-brand-700 text-white border-brand-600';
 
     toast.className = `toast-enter pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-lg text-[13px] font-semibold ${colorClass}`;
     toast.innerHTML = `
       <span class="w-2 h-2 rounded-full bg-white/90 flex-shrink-0"></span>
-      <span>${message}</span>
+      <span>${escapeHtml(message)}</span>
     `;
     toastContainer.appendChild(toast);
 
@@ -146,6 +202,14 @@ document.addEventListener('DOMContentLoaded', () => {
       toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
       setTimeout(() => toast.remove(), 220);
     }, 2800);
+  }
+
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   /* =========================================================================
@@ -170,26 +234,23 @@ document.addEventListener('DOMContentLoaded', () => {
   sidebarCloseBtn?.addEventListener('click', () => setSidebarOpen(false));
   sidebarOverlay?.addEventListener('click', () => setSidebarOpen(false));
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sidebar?.classList.contains('is-open')) {
-      setSidebarOpen(false);
-      menuToggleBtn?.focus();
-    }
-  });
-
   /* =========================================================================
-     4. Interactive Pump Status Card (Toggle ON/OFF + Otomatis / Manual Mode)
+     4. Dashboard State & Database Persistence
      ========================================================================= */
   const state = {
     isPumpOn: false,
-    pumpMode: 'otomatis', // 'otomatis' | 'manual'
+    pumpMode: 'otomatis',
     minMoistureThreshold: 45,
     maxMoistureThreshold: 75,
+    locationName: 'Semarang, Jawa Tengah',
+    latitude: -6.9932,
+    longitude: 110.4203,
     plots: [
-      { id: 'utara', code: 'PU', name: 'Petak Utara', crop: 'Cabai', moisture: 75, pumpOn: false, updated: 'Baru saja' },
-      { id: 'selatan', code: 'PS', name: 'Petak Selatan', crop: 'Tomat', moisture: 68, pumpOn: false, updated: '5 menit lalu' },
-      { id: 'greenhouse', code: 'G1', name: 'Greenhouse 1', crop: 'Melon', moisture: 42, pumpOn: true, updated: 'Baru saja' },
+      { id: 1, code: 'PU', name: 'Petak Utara', crop: 'Cabai', moisture: 75, pumpOn: false, updated: 'Baru saja' },
+      { id: 2, code: 'PS', name: 'Petak Selatan', crop: 'Tomat', moisture: 68, pumpOn: false, updated: '5 menit lalu' },
+      { id: 3, code: 'G1', name: 'Greenhouse 1', crop: 'Melon', moisture: 42, pumpOn: true, updated: 'Baru saja' },
     ],
+    activities: [],
   };
 
   const pumpSwitch = document.getElementById('pump-switch');
@@ -201,13 +262,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const pumpCardIcon = document.getElementById('pump-card-icon');
   const modeBtnAuto = document.getElementById('mode-btn-auto');
   const modeBtnManual = document.getElementById('mode-btn-manual');
+  const cardSoilValue = document.getElementById('card-soil-value');
+  const cardSoilSubtext = document.getElementById('card-soil-subtext');
+  const activityListEl = document.getElementById('activity-list');
+  const plotsTableBody = document.getElementById('plots-table-body');
+  const weatherLocationLabel = document.getElementById('weather-location-label');
+
+  function renderSoilSummaryCard() {
+    if (!cardSoilValue || state.plots.length === 0) return;
+    const avg = Math.round(
+      state.plots.reduce((sum, p) => sum + Number(p.moisture || 0), 0) / state.plots.length
+    );
+
+    let condition = 'Lembap';
+    let subtext = 'Ideal untuk tanaman';
+    if (avg < 45) {
+      condition = 'Kering';
+      subtext = 'Disarankan menyiram lahan';
+    } else if (avg > 82) {
+      condition = 'Basah';
+      subtext = 'Cukup air, tunda penyiraman';
+    }
+    cardSoilValue.textContent = `${condition} (${avg}%)`;
+    if (cardSoilSubtext) cardSoilSubtext.textContent = subtext;
+  }
 
   function renderPumpState() {
     const isOn = state.isPumpOn;
     const isAuto = state.pumpMode === 'otomatis';
     const modeLabel = isAuto ? 'Otomatis' : 'Manual';
 
-    // Update toggle switch appearance
     if (pumpSwitch && pumpSwitchKnob) {
       pumpSwitch.setAttribute('aria-checked', String(isOn));
       pumpSwitch.classList.toggle('bg-brand-600', isOn);
@@ -215,7 +299,6 @@ document.addEventListener('DOMContentLoaded', () => {
       pumpSwitchKnob.style.transform = isOn ? 'translateX(24px)' : 'translateX(0px)';
     }
 
-    // Update mode pill buttons
     if (modeBtnAuto && modeBtnManual) {
       modeBtnAuto.className = isAuto
         ? 'px-2.5 py-1 rounded-full text-[11px] font-bold transition-all bg-purple-600 text-white shadow-sm'
@@ -227,7 +310,6 @@ document.addEventListener('DOMContentLoaded', () => {
       modeBtnManual.setAttribute('aria-pressed', String(!isAuto));
     }
 
-    // Update status badge text & dynamic colors
     if (pumpStatusText) {
       pumpStatusText.textContent = `${isOn ? 'NYALA' : 'MATI'} (${modeLabel})`;
     }
@@ -248,7 +330,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Update subtext
     if (pumpSubtext) {
       if (isOn && isAuto) {
         pumpSubtext.textContent = 'Pompa menyala otomatis menyiram lahan';
@@ -262,44 +343,434 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  pumpSwitch?.addEventListener('click', () => {
-    state.isPumpOn = !state.isPumpOn;
-    // If toggled manually while in Otomatis mode, switch to Manual so farmer control sticks
-    if (state.pumpMode === 'otomatis') {
-      state.pumpMode = 'manual';
+  function renderActivities() {
+    if (!activityListEl || state.activities.length === 0) return;
+
+    const toneStyles = {
+      green: {
+        box: 'bg-[#E8F5E9] text-brand-600',
+        pill: 'bg-[#E8F5E9] text-brand-700',
+        icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+      },
+      amber: {
+        box: 'bg-[#FEF3C7] text-amber-600',
+        pill: 'bg-[#FEF3C7] text-amber-700',
+        icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></svg>',
+      },
+      blue: {
+        box: 'bg-[#E0F2FE] text-sky-600',
+        pill: 'bg-[#E0F2FE] text-sky-700',
+        icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>',
+      },
+      purple: {
+        box: 'bg-[#EDE9FE] text-purple-600',
+        pill: 'bg-[#EDE9FE] text-purple-700',
+        icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+      },
+    };
+
+    activityListEl.innerHTML = state.activities
+      .slice(0, 4)
+      .map((item) => {
+        const style = toneStyles[item.tone] || toneStyles.green;
+        return `
+          <li class="flex items-center justify-between gap-3 p-2.5 -mx-2 rounded-xl hover:bg-slate-50/80 transition-colors">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-xl ${style.box} flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                ${style.icon}
+              </div>
+              <div class="min-w-0">
+                <p class="text-[13.5px] font-bold text-slate-900 truncate">${escapeHtml(item.title)}</p>
+                <p class="text-[12px] text-slate-500 truncate">${escapeHtml(item.subtitle)}</p>
+              </div>
+            </div>
+            <span class="flex-shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold ${style.pill}">
+              ${escapeHtml(item.tag)}
+            </span>
+          </li>
+        `;
+      })
+      .join('');
+  }
+
+  function renderPlotsTable() {
+    if (!plotsTableBody) return;
+    const avatarPalette = [
+      'bg-[#E8F5E9] text-brand-700',
+      'bg-[#FEF3C7] text-amber-700',
+      'bg-[#EDE9FE] text-purple-700',
+      'bg-[#E0F2FE] text-sky-700',
+    ];
+
+    plotsTableBody.innerHTML = state.plots
+      .map((plot, idx) => {
+        const avatarClass = avatarPalette[idx % avatarPalette.length];
+        const moistureColor = plot.moisture < 50 ? 'text-amber-600' : 'text-slate-800';
+        const statusBtn = plot.pumpOn
+          ? `<button type="button" data-quick-toggle-plot="${plot.id}" title="Klik untuk mematikan" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-semibold bg-[#E8F5E9] hover:bg-brand-100 text-brand-700 transition-colors"><span class="w-1.5 h-1.5 rounded-full bg-brand-600 animate-pulse"></span>Menyiram (ON)</button>`
+          : `<button type="button" data-quick-toggle-plot="${plot.id}" title="Klik untuk menyiram" class="inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">Mati (Cukup Air)</button>`;
+
+        return `
+          <tr class="hover:bg-slate-50/70 transition-colors">
+            <td class="py-3.5 pr-4">
+              <div class="flex items-center gap-3">
+                <span class="w-8 h-8 rounded-full ${avatarClass} text-[11px] font-bold flex items-center justify-center flex-shrink-0">${escapeHtml(plot.code)}</span>
+                <span class="font-bold text-slate-900">${escapeHtml(plot.name)}</span>
+              </div>
+            </td>
+            <td class="py-3.5 px-3 font-medium text-slate-600">${escapeHtml(plot.crop)}</td>
+            <td class="py-3.5 px-3 font-bold ${moistureColor}">${plot.moisture}%</td>
+            <td class="py-3.5 px-3">${statusBtn}</td>
+            <td class="py-3.5 px-3 text-right text-slate-500 text-[12.5px]">${escapeHtml(plot.updated)}</td>
+            <td class="py-3.5 pl-3 text-right">
+              <div class="inline-flex items-center gap-1">
+                <button type="button" data-edit-plot="${plot.id}" class="px-2 py-1 rounded-lg text-[11.5px] font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900">Edit</button>
+                <button type="button" data-delete-plot="${plot.id}" class="px-2 py-1 rounded-lg text-[11.5px] font-semibold text-rose-600 hover:bg-rose-50">Hapus</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    plotsTableBody.querySelectorAll('[data-quick-toggle-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const plotId = Number(btn.getAttribute('data-quick-toggle-plot'));
+        togglePlotPump(plotId);
+      });
+    });
+
+    plotsTableBody.querySelectorAll('[data-edit-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const plotId = Number(btn.getAttribute('data-edit-plot'));
+        const plot = state.plots.find((p) => p.id === plotId);
+        if (plot) openPlotModal(plot);
+      });
+    });
+
+    plotsTableBody.querySelectorAll('[data-delete-plot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const plotId = Number(btn.getAttribute('data-delete-plot'));
+        deletePlotById(plotId);
+      });
+    });
+  }
+
+  function applyDashboardSnapshot(snapshot) {
+    if (snapshot.user) {
+      applyUserProfile(snapshot.user);
+      try {
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(snapshot.user));
+      } catch {
+        // Ignore storage error
+      }
     }
+    if (snapshot.settings) {
+      state.isPumpOn = Boolean(snapshot.settings.isPumpOn);
+      state.pumpMode = snapshot.settings.pumpMode || 'otomatis';
+      state.minMoistureThreshold = Number(snapshot.settings.minMoistureThreshold ?? 45);
+      state.maxMoistureThreshold = Number(snapshot.settings.maxMoistureThreshold ?? 75);
+      state.locationName = snapshot.settings.locationName || 'Semarang, Jawa Tengah';
+      state.latitude = Number(snapshot.settings.latitude ?? -6.9932);
+      state.longitude = Number(snapshot.settings.longitude ?? 110.4203);
+    }
+    if (Array.isArray(snapshot.plots)) {
+      state.plots = snapshot.plots;
+    }
+    if (Array.isArray(snapshot.activities)) {
+      state.activities = snapshot.activities;
+    }
+
+    if (weatherLocationLabel) {
+      weatherLocationLabel.textContent = state.locationName;
+    }
+
     renderPumpState();
-    showToast(
-      state.isPumpOn
-        ? 'Pompa utama dinyalakan (Mode Manual).'
-        : 'Pompa utama dimatikan (Mode Manual).'
+    renderSoilSummaryCard();
+    renderPlotsTable();
+    renderActivities();
+
+    if (currentNav !== 'dashboard') {
+      renderSecondaryView(currentNav);
+    }
+  }
+
+  async function persistSettings(payload, toastMessage) {
+    try {
+      const { ok, data } = await apiRequest('/api/pump', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal menyimpan pengaturan ke database.', 'error');
+        return false;
+      }
+      applyDashboardSnapshot(data);
+      if (toastMessage) showToast(toastMessage);
+      return true;
+    } catch {
+      showToast('Koneksi server terganggu saat menyimpan data.', 'error');
+      return false;
+    }
+  }
+
+  async function togglePlotPump(plotId) {
+    const target = state.plots.find((p) => p.id === plotId);
+    if (!target) return;
+    const nextPump = !target.pumpOn;
+
+    try {
+      const { ok, data } = await apiRequest('/api/plots', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: plotId, pumpOn: nextPump }),
+      });
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal memperbarui status petak.', 'error');
+        return;
+      }
+      applyDashboardSnapshot(data);
+      showToast(nextPump ? `Penyiraman ${target.name} dinyalakan.` : `Penyiraman ${target.name} dimatikan.`);
+    } catch {
+      showToast('Gagal menyimpan status petak.', 'error');
+    }
+  }
+
+  async function deletePlotById(plotId) {
+    const target = state.plots.find((p) => p.id === plotId);
+    if (!target) return;
+    if (state.plots.length <= 1) {
+      showToast('Minimal harus tersisa 1 petak lahan.', 'error');
+      return;
+    }
+    try {
+      const { ok, data } = await apiRequest('/api/plots', {
+        method: 'DELETE',
+        body: JSON.stringify({ id: plotId }),
+      });
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal menghapus petak.', 'error');
+        return;
+      }
+      applyDashboardSnapshot(data);
+      showToast(`Petak ${target.name} dihapus.`, 'info');
+    } catch {
+      showToast('Gagal menghapus petak.', 'error');
+    }
+  }
+
+  pumpSwitch?.addEventListener('click', async () => {
+    const nextPump = !state.isPumpOn;
+    const nextMode = state.pumpMode === 'otomatis' ? 'manual' : state.pumpMode;
+    await persistSettings(
+      { isPumpOn: nextPump, pumpMode: nextMode, logAction: 'pump-toggle' },
+      nextPump ? 'Pompa utama dinyalakan (Mode Manual).' : 'Pompa utama dimatikan (Mode Manual).'
     );
-    // Refresh secondary view if currently on Kontrol Irigasi
-    if (currentNav === 'kontrol-irigasi') renderSecondaryView('kontrol-irigasi');
   });
 
-  modeBtnAuto?.addEventListener('click', () => {
+  modeBtnAuto?.addEventListener('click', async () => {
     if (state.pumpMode === 'otomatis') return;
-    state.pumpMode = 'otomatis';
-    // In automatic mode, average moisture is 72% (ideal), so main pump rests OFF
-    state.isPumpOn = false;
-    renderPumpState();
-    showToast('Mode pompa diubah ke Otomatis (mengikuti sensor).', 'info');
-    if (currentNav === 'kontrol-irigasi') renderSecondaryView('kontrol-irigasi');
+    await persistSettings(
+      { isPumpOn: false, pumpMode: 'otomatis', logAction: 'mode-change' },
+      'Mode pompa diubah ke Otomatis (tersimpan di database).'
+    );
   });
 
-  modeBtnManual?.addEventListener('click', () => {
+  modeBtnManual?.addEventListener('click', async () => {
     if (state.pumpMode === 'manual') return;
-    state.pumpMode = 'manual';
-    renderPumpState();
-    showToast('Mode pompa diubah ke Manual.', 'info');
-    if (currentNav === 'kontrol-irigasi') renderSecondaryView('kontrol-irigasi');
+    await persistSettings(
+      { pumpMode: 'manual', logAction: 'mode-change' },
+      'Mode pompa diubah ke Manual (tersimpan di database).'
+    );
   });
-
-  renderPumpState();
 
   /* =========================================================================
-     5. Interactive Dual-Line SVG Chart ("Grafik Kelembapan Tanah")
+     5. Modal: Tambah / Edit Petak Lahan
+     ========================================================================= */
+  const modalPlot = document.getElementById('modal-plot');
+  const modalPlotTitle = document.getElementById('modal-plot-title');
+  const btnOpenAddPlot = document.getElementById('btn-open-add-plot');
+  const btnClosePlotModal = document.getElementById('modal-plot-close');
+  const btnCancelPlotModal = document.getElementById('modal-plot-cancel');
+  const formPlot = document.getElementById('form-plot');
+  const plotEditId = document.getElementById('plot-edit-id');
+  const plotInputName = document.getElementById('plot-input-name');
+  const plotInputCrop = document.getElementById('plot-input-crop');
+  const plotInputMoisture = document.getElementById('plot-input-moisture');
+  const plotMoistureVal = document.getElementById('plot-moisture-val');
+
+  function openPlotModal(plot = null) {
+    if (!modalPlot) return;
+    if (plot) {
+      if (modalPlotTitle) modalPlotTitle.textContent = `Edit ${plot.name}`;
+      if (plotEditId) plotEditId.value = String(plot.id);
+      if (plotInputName) plotInputName.value = plot.name;
+      if (plotInputCrop) plotInputCrop.value = plot.crop;
+      if (plotInputMoisture) plotInputMoisture.value = String(plot.moisture);
+      if (plotMoistureVal) plotMoistureVal.textContent = `${plot.moisture}%`;
+    } else {
+      if (modalPlotTitle) modalPlotTitle.textContent = 'Tambah Petak Lahan';
+      if (plotEditId) plotEditId.value = '';
+      if (plotInputName) plotInputName.value = '';
+      if (plotInputCrop) plotInputCrop.value = '';
+      if (plotInputMoisture) plotInputMoisture.value = '65';
+      if (plotMoistureVal) plotMoistureVal.textContent = '65%';
+    }
+    modalPlot.classList.remove('hidden');
+    plotInputName?.focus();
+  }
+
+  function closePlotModal() {
+    modalPlot?.classList.add('hidden');
+  }
+
+  plotInputMoisture?.addEventListener('input', () => {
+    if (plotMoistureVal) plotMoistureVal.textContent = `${plotInputMoisture.value}%`;
+  });
+
+  btnOpenAddPlot?.addEventListener('click', () => openPlotModal(null));
+  btnClosePlotModal?.addEventListener('click', closePlotModal);
+  btnCancelPlotModal?.addEventListener('click', closePlotModal);
+  modalPlot?.addEventListener('click', (e) => {
+    if (e.target === modalPlot) closePlotModal();
+  });
+
+  formPlot?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const idVal = plotEditId?.value ? Number(plotEditId.value) : null;
+    const name = plotInputName?.value.trim() || '';
+    const crop = plotInputCrop?.value.trim() || '';
+    const moisture = Number(plotInputMoisture?.value || 65);
+
+    if (!name || !crop) {
+      showToast('Nama Petak dan Jenis Tanaman wajib diisi.', 'error');
+      return;
+    }
+
+    try {
+      const { ok, data } = await apiRequest('/api/plots', {
+        method: idVal ? 'PATCH' : 'POST',
+        body: JSON.stringify(idVal ? { id: idVal, name, crop, moisture } : { name, crop, moisture }),
+      });
+
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal menyimpan petak lahan.', 'error');
+        return;
+      }
+
+      applyDashboardSnapshot(data);
+      closePlotModal();
+      showToast(idVal ? `Petak ${name} diperbarui.` : `Petak ${name} ditambahkan ke database.`);
+    } catch {
+      showToast('Gagal terhubung ke server saat menyimpan petak.', 'error');
+    }
+  });
+
+  /* =========================================================================
+     6. Modal: Pilih Lokasi Lahan (Open-Meteo Geocoding)
+     ========================================================================= */
+  const modalLocation = document.getElementById('modal-location');
+  const btnOpenLocationModal = document.getElementById('btn-open-location-modal');
+  const btnCloseLocationModal = document.getElementById('modal-location-close');
+  const formLocationSearch = document.getElementById('form-location-search');
+  const locationSearchInput = document.getElementById('location-search-input');
+  const locationResultsEl = document.getElementById('location-results');
+
+  function openLocationModal() {
+    if (!modalLocation) return;
+    modalLocation.classList.remove('hidden');
+    if (locationSearchInput) {
+      locationSearchInput.value = '';
+      locationSearchInput.focus();
+    }
+  }
+
+  function closeLocationModal() {
+    modalLocation?.classList.add('hidden');
+  }
+
+  btnOpenLocationModal?.addEventListener('click', openLocationModal);
+  btnCloseLocationModal?.addEventListener('click', closeLocationModal);
+  modalLocation?.addEventListener('click', (e) => {
+    if (e.target === modalLocation) closeLocationModal();
+  });
+
+  formLocationSearch?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const query = locationSearchInput?.value.trim() || '';
+    if (!query || !locationResultsEl) return;
+
+    locationResultsEl.innerHTML =
+      '<p class="text-xs text-slate-500 text-center py-4">Mencari lokasi...</p>';
+
+    try {
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=6&language=id&format=json`;
+      const res = await fetch(geoUrl);
+      const data = await res.json();
+      const results = Array.isArray(data.results) ? data.results : [];
+
+      if (results.length === 0) {
+        locationResultsEl.innerHTML =
+          '<p class="text-xs text-rose-600 text-center py-4">Lokasi tidak ditemukan. Coba nama kota atau kabupaten lain.</p>';
+        return;
+      }
+
+      locationResultsEl.innerHTML = results
+        .map((item, idx) => {
+          const region = [item.admin1, item.country].filter(Boolean).join(', ');
+          const displayLabel = item.admin1 ? `${item.name}, ${item.admin1}` : item.name;
+          return `
+            <button
+              type="button"
+              data-pick-location="${idx}"
+              class="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-brand-500 hover:bg-brand-50/50 transition-colors flex items-center justify-between gap-2"
+            >
+              <div>
+                <p class="font-bold text-slate-900 text-xs">${escapeHtml(displayLabel)}</p>
+                <p class="text-[11px] text-slate-500">${escapeHtml(region)}</p>
+              </div>
+              <span class="text-[11px] font-bold text-brand-700">Pilih</span>
+            </button>
+          `;
+        })
+        .join('');
+
+      locationResultsEl.querySelectorAll('[data-pick-location]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const idx = Number(btn.getAttribute('data-pick-location'));
+          const chosen = results[idx];
+          if (!chosen) return;
+          const label = chosen.admin1 ? `${chosen.name}, ${chosen.admin1}` : chosen.name;
+          const saved = await persistSettings(
+            {
+              locationName: label,
+              latitude: chosen.latitude,
+              longitude: chosen.longitude,
+              logAction: 'location-change',
+            },
+            `Lokasi cuaca diubah ke ${label}.`
+          );
+          if (saved) {
+            closeLocationModal();
+            fetchLiveWeather();
+          }
+        });
+      });
+    } catch {
+      locationResultsEl.innerHTML =
+        '<p class="text-xs text-rose-600 text-center py-4">Gagal mencari lokasi. Periksa koneksi internet.</p>';
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (sidebar?.classList.contains('is-open')) setSidebarOpen(false);
+      if (modalPlot && !modalPlot.classList.contains('hidden')) closePlotModal();
+      if (modalLocation && !modalLocation.classList.contains('hidden')) closeLocationModal();
+    }
+  });
+
+  /* =========================================================================
+     7. Interactive Dual-Line SVG Chart ("Grafik Kelembapan Tanah")
      ========================================================================= */
   const chartDataSets = {
     'this-week': [
@@ -331,11 +802,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const chartRangeSelect = document.getElementById('chart-range-select');
 
   let activeChartRange = 'this-week';
-  let activePointIndex = 3; // Default highlight on Kamis (matches reference image)
+  let activePointIndex = 3;
 
-  /**
-   * Build a smooth cubic Bezier path through an array of {x, y} points.
-   */
   function buildSmoothPath(points) {
     if (points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
@@ -370,7 +838,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const plotW = width - padLeft - padRight;
     const plotH = height - padTop - padBottom;
 
-    // Y range: 20% to 85%
     const minY = 20;
     const maxY = 85;
     const valToY = (val) => padTop + plotH - ((val - minY) / (maxY - minY)) * plotH;
@@ -433,25 +900,16 @@ document.addEventListener('DOMContentLoaded', () => {
           <stop offset="100%" stop-color="#84CC4A" stop-opacity="0.0" />
         </linearGradient>
       </defs>
-
       ${gridLinesSvg}
-
-      <!-- Vertical active day guide line -->
       <line x1="${activeX}" y1="${padTop}" x2="${activeX}" y2="${bottomY}" stroke="#CBD5E1" stroke-width="1.2" stroke-dasharray="4 4" />
-
-      <!-- Soft pastel area fills -->
       <path d="${utaraArea}" fill="url(#gradUtara)" />
       <path d="${selatanArea}" fill="url(#gradSelatan)" />
-
-      <!-- Smooth dual lines -->
       <path d="${selatanPath}" fill="none" stroke="#84CC4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
       <path d="${utaraPath}" fill="none" stroke="#1B6B3A" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" />
-
       ${xLabelsSvg}
       ${pointsSvg}
     `;
 
-    // Bind hover / click events to hit regions
     chartSvg.querySelectorAll('.chart-point-hit').forEach((rect) => {
       const idx = Number(rect.getAttribute('data-index'));
       rect.addEventListener('mouseenter', () => {
@@ -464,7 +922,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // Position floating tooltip over the active day
     const activeData = data[activePointIndex];
     if (chartTooltip && tooltipDay && tooltipUtara && tooltipSelatan && chartContainer) {
       tooltipDay.textContent = activeData.fullDay;
@@ -496,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================================================================
-     6. Notification Bell Popover
+     8. Notification Bell Popover
      ========================================================================= */
   const notifBtn = document.getElementById('notif-btn');
   const notifPopover = document.getElementById('notif-popover');
@@ -529,7 +986,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* =========================================================================
-     7. Download Report ("Unduh Laporan")
+     9. Download Report ("Unduh Laporan")
      ========================================================================= */
   const btnDownloadReport = document.getElementById('btn-download-report');
 
@@ -538,9 +995,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const pumpStatusStr = `${state.isPumpOn ? 'NYALA' : 'MATI'} (${state.pumpMode === 'otomatis' ? 'Otomatis' : 'Manual'})`;
     const rows = [
       ['Laporan Harian Irigasi Cerdas', `Tanggal: ${todayStr}`, `Pemilik: ${activeUserName}`],
+      ['Lokasi Lahan', state.locationName, `Koordinat: ${state.latitude}, ${state.longitude}`],
       [],
       ['Ringkasan Sistem', 'Nilai', 'Keterangan'],
-      ['Kondisi Tanah', 'Lembap (72%)', 'Ideal untuk tanaman'],
+      ['Kondisi Tanah', cardSoilValue?.textContent || 'Lembap', cardSoilSubtext?.textContent || ''],
       ['Sisa Air Tandon', '85% Penuh', 'Aman dari meluber'],
       ['Pemakaian Listrik', 'Rp 32.000', 'Estimasi bulan ini'],
       ['Status Pompa Utama', pumpStatusStr, 'Kontrol Irigasi'],
@@ -574,7 +1032,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnDownloadReport?.addEventListener('click', downloadCsvReport);
 
   /* =========================================================================
-     8. Sidebar Navigation & Clean Sub-views
+     10. Sidebar Navigation & Secondary Sub-views
      ========================================================================= */
   const navLinks = document.querySelectorAll('[data-nav]');
   const jumpLinks = document.querySelectorAll('[data-jump-nav]');
@@ -590,11 +1048,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const secondaryMeta = {
     'petak-lahan': {
       title: 'Daftar Petak Lahan',
-      subtitle: 'Pantau kelembapan dan nyalakan keran penyiraman per petak.',
+      subtitle: 'Tambah, ubah, atau nyalakan penyiraman per petak secara langsung.',
     },
     cuaca: {
       title: 'Prakiraan Cuaca Lahan',
-      subtitle: 'Informasi cuaca lokal untuk membantu jadwal penyiraman.',
+      subtitle: 'Informasi cuaca lokal otomatis menyesuaikan lokasi lahan Anda.',
     },
     'kontrol-irigasi': {
       title: 'Kontrol Irigasi & Pompa',
@@ -605,8 +1063,8 @@ document.addEventListener('DOMContentLoaded', () => {
       subtitle: 'Catatan pemakaian air, listrik, dan hasil penyiraman otomatis.',
     },
     'pengaturan-alat': {
-      title: 'Pengaturan Alat & Sensor',
-      subtitle: `Status koneksi sensor tanah dan pompa air di lahan ${activeUserName}.`,
+      title: 'Pengaturan Alat & Lokasi',
+      subtitle: `Status koneksi sensor tanah, lokasi lahan, dan kontrol akun ${activeUserName}.`,
     },
     bantuan: {
       title: 'Bantuan Penggunaan',
@@ -614,63 +1072,31 @@ document.addEventListener('DOMContentLoaded', () => {
     },
   };
 
-  const plotsTableBody = document.getElementById('plots-table-body');
-
-  function renderPlotsTable() {
-    if (!plotsTableBody) return;
-    const badgeStyles = {
-      PU: 'bg-[#E8F5E9] text-brand-700',
-      PS: 'bg-[#FEF3C7] text-amber-700',
-      G1: 'bg-[#EDE9FE] text-purple-700',
-    };
-    plotsTableBody.innerHTML = state.plots
-      .map((plot) => {
-        const avatarClass = badgeStyles[plot.code] || 'bg-slate-100 text-slate-700';
-        const moistureColor = plot.moisture < 50 ? 'text-amber-600' : 'text-slate-800';
-        const statusBadge = plot.pumpOn
-          ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-semibold bg-[#E8F5E9] text-brand-700"><span class="w-1.5 h-1.5 rounded-full bg-brand-600 animate-pulse"></span>Menyiram (ON)</span>`
-          : `<span class="inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold bg-slate-100 text-slate-700">Mati (Cukup Air)</span>`;
-
-        return `
-          <tr class="hover:bg-slate-50/70 transition-colors">
-            <td class="py-3.5 pr-4">
-              <div class="flex items-center gap-3">
-                <span class="w-8 h-8 rounded-full ${avatarClass} text-[11px] font-bold flex items-center justify-center flex-shrink-0">${plot.code}</span>
-                <span class="font-bold text-slate-900">${plot.name}</span>
-              </div>
-            </td>
-            <td class="py-3.5 px-3 font-medium text-slate-600">${plot.crop}</td>
-            <td class="py-3.5 px-3 font-bold ${moistureColor}">${plot.moisture}%</td>
-            <td class="py-3.5 px-3">${statusBadge}</td>
-            <td class="py-3.5 pl-3 text-right text-slate-500 text-[12.5px]">${plot.updated}</td>
-          </tr>
-        `;
-      })
-      .join('');
-  }
-
   function renderSecondaryView(section) {
     if (!secondaryBody || !secondaryTitle || !secondarySubtitle) return;
     const meta = secondaryMeta[section];
     if (!meta) return;
 
     secondaryTitle.textContent = meta.title;
-    secondarySubtitle.textContent = meta.subtitle;
+    secondarySubtitle.textContent =
+      section === 'pengaturan-alat'
+        ? `Status koneksi sensor tanah dan lokasi lahan ${activeUserName}.`
+        : meta.subtitle;
 
     if (section === 'petak-lahan') {
-      secondaryBody.innerHTML = state.plots
+      const cardsHtml = state.plots
         .map(
           (plot) => `
           <div class="bg-white rounded-2xl border border-[#EEF2EF] p-5 shadow-sm flex flex-col justify-between gap-4">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <span class="w-10 h-10 rounded-full bg-brand-100 text-brand-700 font-bold text-sm flex items-center justify-center">${plot.code}</span>
-                <div>
-                  <h3 class="font-bold text-slate-900">${plot.name}</h3>
-                  <p class="text-xs text-slate-500">Tanaman: ${plot.crop}</p>
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-3 min-w-0">
+                <span class="w-10 h-10 rounded-full bg-brand-100 text-brand-700 font-bold text-sm flex items-center justify-center flex-shrink-0">${escapeHtml(plot.code)}</span>
+                <div class="min-w-0">
+                  <h3 class="font-bold text-slate-900 truncate">${escapeHtml(plot.name)}</h3>
+                  <p class="text-xs text-slate-500 truncate">Tanaman: ${escapeHtml(plot.crop)}</p>
                 </div>
               </div>
-              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${plot.pumpOn ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-600'}">
+              <span class="px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0 ${plot.pumpOn ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-600'}">
                 ${plot.pumpOn ? 'Menyiram (ON)' : 'Mati (Cukup Air)'}
               </span>
             </div>
@@ -678,32 +1104,40 @@ document.addEventListener('DOMContentLoaded', () => {
               <span class="text-xs font-medium text-slate-600">Kelembapan Tanah</span>
               <span class="text-lg font-extrabold text-slate-900">${plot.moisture}%</span>
             </div>
-            <button type="button" data-toggle-plot="${plot.id}" class="w-full py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+            <div class="flex gap-2">
+              <button type="button" data-toggle-plot="${plot.id}" class="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
             plot.pumpOn
               ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
               : 'bg-brand-600 hover:bg-brand-700 text-white'
           }">
-              ${plot.pumpOn ? 'Matikan Penyiraman' : 'Siram Petak Ini'}
-            </button>
+                ${plot.pumpOn ? 'Matikan' : 'Siram Petak'}
+              </button>
+              <button type="button" data-sub-edit-plot="${plot.id}" class="px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                Edit
+              </button>
+            </div>
           </div>
         `
         )
         .join('');
 
+      secondaryBody.innerHTML = `
+        <div class="md:col-span-2 lg:col-span-3 flex items-center justify-between bg-white rounded-2xl border border-[#EEF2EF] p-4">
+          <p class="text-sm font-medium text-slate-600">Total petak aktif: <strong class="text-slate-900">${state.plots.length} Petak</strong></p>
+          <button type="button" id="sub-add-plot-btn" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">+ Tambah Petak</button>
+        </div>
+        ${cardsHtml}
+      `;
+
+      document.getElementById('sub-add-plot-btn')?.addEventListener('click', () => openPlotModal(null));
       secondaryBody.querySelectorAll('[data-toggle-plot]').forEach((btn) => {
+        btn.addEventListener('click', () => togglePlotPump(Number(btn.getAttribute('data-toggle-plot'))));
+      });
+      secondaryBody.querySelectorAll('[data-sub-edit-plot]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const id = btn.getAttribute('data-toggle-plot');
-          const target = state.plots.find((p) => p.id === id);
-          if (!target) return;
-          target.pumpOn = !target.pumpOn;
-          target.updated = 'Baru saja';
-          showToast(
-            target.pumpOn
-              ? `Penyiraman ${target.name} dinyalakan.`
-              : `Penyiraman ${target.name} dimatikan.`
-          );
-          renderPlotsTable();
-          renderSecondaryView('petak-lahan');
+          const id = Number(btn.getAttribute('data-sub-edit-plot'));
+          const plot = state.plots.find((p) => p.id === id);
+          if (plot) openPlotModal(plot);
         });
       });
     } else if (section === 'kontrol-irigasi') {
@@ -731,7 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span>Mulai Siram Jika di Bawah</span>
                 <span id="sub-min-val">${state.minMoistureThreshold}%</span>
               </div>
-              <input id="sub-min-slider" type="range" min="25" max="60" value="${state.minMoistureThreshold}" class="w-full irigasi-slider" />
+              <input id="sub-min-slider" type="range" min="20" max="65" value="${state.minMoistureThreshold}" class="w-full irigasi-slider" />
             </div>
             <div>
               <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
@@ -741,6 +1175,9 @@ document.addEventListener('DOMContentLoaded', () => {
               <input id="sub-max-slider" type="range" min="65" max="90" value="${state.maxMoistureThreshold}" class="w-full irigasi-slider" />
             </div>
           </div>
+          <button type="button" id="sub-save-thresholds" class="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">
+            Simpan Batas Otomatis
+          </button>
         </div>
       `;
 
@@ -750,13 +1187,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const minSlider = document.getElementById('sub-min-slider');
       const maxSlider = document.getElementById('sub-max-slider');
+      let draftMin = state.minMoistureThreshold;
+      let draftMax = state.maxMoistureThreshold;
+
       minSlider?.addEventListener('input', (e) => {
-        state.minMoistureThreshold = Number(e.target.value);
-        document.getElementById('sub-min-val').textContent = `${state.minMoistureThreshold}%`;
+        draftMin = Number(e.target.value);
+        document.getElementById('sub-min-val').textContent = `${draftMin}%`;
       });
       maxSlider?.addEventListener('input', (e) => {
-        state.maxMoistureThreshold = Number(e.target.value);
-        document.getElementById('sub-max-val').textContent = `${state.maxMoistureThreshold}%`;
+        draftMax = Number(e.target.value);
+        document.getElementById('sub-max-val').textContent = `${draftMax}%`;
+      });
+
+      document.getElementById('sub-save-thresholds')?.addEventListener('click', async () => {
+        await persistSettings(
+          {
+            minMoistureThreshold: draftMin,
+            maxMoistureThreshold: draftMax,
+            logAction: 'threshold-change',
+          },
+          'Batas kelembapan otomatis disimpan ke database.'
+        );
       });
     } else if (section === 'cuaca') {
       const w = weatherState;
@@ -777,10 +1228,12 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="bg-[#EEF6FD] rounded-2xl border border-[#DCEBFA] p-6 space-y-4 md:col-span-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p class="text-xs font-bold uppercase text-sky-700">Cuaca Live (Open-Meteo)</p>
+              <p class="text-xs font-bold uppercase text-sky-700">Cuaca Live • ${escapeHtml(state.locationName)}</p>
               <p class="text-3xl font-extrabold text-slate-900 mt-1">${w.temp}°C • ${w.condition}</p>
             </div>
-            <span class="px-3 py-1.5 rounded-xl bg-white text-sky-700 text-xs font-bold">Peluang Hujan ${w.rainChance}%</span>
+            <button type="button" id="sub-change-location-btn" class="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-sky-700 text-xs font-bold border border-sky-200">
+              Ubah Lokasi Lahan
+            </button>
           </div>
           <p class="text-sm text-slate-600">${w.adviceLong}</p>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
@@ -789,12 +1242,15 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="bg-white rounded-2xl border border-[#EEF2EF] p-6 space-y-2.5">
           <h3 class="font-bold text-slate-900 text-base">Info Cuaca Lahan</h3>
+          <div class="flex justify-between text-sm py-1.5 border-b border-slate-100"><span class="text-slate-500">Lokasi</span><span class="font-bold text-right">${escapeHtml(state.locationName)}</span></div>
           <div class="flex justify-between text-sm py-1.5 border-b border-slate-100"><span class="text-slate-500">Kelembapan Udara</span><span class="font-bold">${w.humidity}%</span></div>
           <div class="flex justify-between text-sm py-1.5 border-b border-slate-100"><span class="text-slate-500">Kecepatan Angin</span><span class="font-bold">${w.wind} km/jam</span></div>
-          <div class="flex justify-between text-sm py-1.5 border-b border-slate-100"><span class="text-slate-500">Saran Irigasi</span><span class="font-bold text-sky-700">${w.adviceShort}</span></div>
+          <div class="flex justify-between text-sm py-1.5 border-b border-slate-100"><span class="text-slate-500">Peluang Hujan</span><span class="font-bold text-sky-700">${w.rainChance}% (${w.adviceShort})</span></div>
           <div class="flex justify-between text-sm py-1.5"><span class="text-slate-500">Pembaruan</span><span class="font-semibold text-slate-600">${w.updatedAt}</span></div>
         </div>
       `;
+
+      document.getElementById('sub-change-location-btn')?.addEventListener('click', openLocationModal);
     } else if (section === 'laporan') {
       secondaryBody.innerHTML = `
         <div class="bg-[#EFF8F1] rounded-2xl border border-[#E1EFE4] p-6">
@@ -819,19 +1275,27 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (section === 'pengaturan-alat') {
       secondaryBody.innerHTML = `
         <div class="bg-white rounded-2xl border border-[#EEF2EF] p-6 space-y-3 md:col-span-2">
-          <h3 class="font-bold text-slate-900">Status Perangkat di Lahan</h3>
-          <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-sm font-semibold">Sensor Tanah Petak Utara</span><span class="text-xs font-bold text-brand-700">Terhubung • Baterai 92%</span></div>
-          <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-sm font-semibold">Sensor Tanah Petak Selatan</span><span class="text-xs font-bold text-brand-700">Terhubung • Baterai 88%</span></div>
-          <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-sm font-semibold">Pelampung Tandon Utama</span><span class="text-xs font-bold text-brand-700">Terhubung • Normal</span></div>
+          <h3 class="font-bold text-slate-900">Pengaturan Lokasi & Sensor Lahan</h3>
+          <div class="flex items-center justify-between p-3.5 rounded-xl bg-[#EEF6FD] border border-[#DCEBFA]">
+            <div>
+              <p class="text-xs font-semibold text-sky-800">Lokasi Prakiraan Cuaca</p>
+              <p class="text-sm font-bold text-slate-900 mt-0.5">${escapeHtml(state.locationName)}</p>
+            </div>
+            <button type="button" id="settings-change-loc" class="px-3.5 py-2 rounded-xl bg-white text-sky-700 text-xs font-bold border border-sky-200 hover:bg-sky-50">Ubah Lokasi</button>
+          </div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-sm font-semibold">Total Petak Terpantau</span><span class="text-xs font-bold text-brand-700">${state.plots.length} Petak Aktif</span></div>
+          <div class="flex items-center justify-between p-3 rounded-xl bg-[#EFF8F1]"><span class="text-sm font-semibold">Pelampung Tandon Utama</span><span class="text-xs font-bold text-brand-700">Normal (85% Penuh)</span></div>
         </div>
       `;
+      document.getElementById('settings-change-loc')?.addEventListener('click', openLocationModal);
     } else if (section === 'bantuan') {
       secondaryBody.innerHTML = `
         <div class="bg-white rounded-2xl border border-[#EEF2EF] p-6 space-y-3 md:col-span-3">
           <h3 class="font-bold text-slate-900">Cara Mudah Menggunakan Irigasi Cerdas</h3>
           <ul class="space-y-2 text-sm text-slate-600 list-disc pl-5">
-            <li><strong>Mode Otomatis:</strong> Biarkan sistem menyiram sendiri saat tanah mulai kering dan berhenti saat cukup air.</li>
-            <li><strong>Sakelar Manual:</strong> Gunakan tombol sakelar di kartu <em>Status Pompa</em> untuk langsung menyalakan atau mematikan pompa kapan saja.</li>
+            <li><strong>Mode Otomatis & Manual:</strong> Setiap perubahan sakelar pompa atau mode otomatis tersimpan ke database akun Anda.</li>
+            <li><strong>Tambah & Edit Petak:</strong> Klik tombol <em>+ Tambah Petak</em> di tabel Status Petak Lahan untuk menambah atau mengubah tanaman.</li>
+            <li><strong>Ubah Lokasi Cuaca:</strong> Klik <em>Ubah Lokasi</em> pada kartu cuaca untuk mencari kota atau kecamatan lahan Anda.</li>
             <li><strong>Unduh Laporan:</strong> Tekan tombol hijau di pojok kanan atas untuk menyimpan catatan kondisi lahan harian.</li>
           </ul>
         </div>
@@ -883,11 +1347,8 @@ document.addEventListener('DOMContentLoaded', () => {
   btnBackDashboard?.addEventListener('click', () => navigateTo('dashboard'));
 
   /* =========================================================================
-     9. Live Weather Integration (Open-Meteo API)
+     11. Live Weather Integration (Open-Meteo API using user coordinates)
      ========================================================================= */
-  const WEATHER_API_URL =
-    'https://api.open-meteo.com/v1/forecast?latitude=-6.9932&longitude=110.4203&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FJakarta';
-
   const weatherMainIconEl = document.getElementById('weather-main-icon');
   const weatherTempEl = document.getElementById('weather-temp');
   const weatherConditionEl = document.getElementById('weather-condition');
@@ -929,31 +1390,22 @@ document.addEventListener('DOMContentLoaded', () => {
         <svg class="w-14 h-14" viewBox="0 0 64 64" fill="none">
           <circle cx="32" cy="32" r="14" fill="#FBBF24"/>
           <g stroke="#FBBF24" stroke-width="3" stroke-linecap="round">
-            <line x1="32" y1="8" x2="32" y2="13"/>
-            <line x1="32" y1="51" x2="32" y2="56"/>
-            <line x1="8" y1="32" x2="13" y2="32"/>
-            <line x1="51" y1="32" x2="56" y2="32"/>
-            <line x1="15" y1="15" x2="18.5" y2="18.5"/>
-            <line x1="45.5" y1="45.5" x2="49" y2="49"/>
-            <line x1="49" y1="15" x2="45.5" y2="18.5"/>
-            <line x1="18.5" y1="45.5" x2="15" y2="49"/>
+            <line x1="32" y1="8" x2="32" y2="13"/><line x1="32" y1="51" x2="32" y2="56"/>
+            <line x1="8" y1="32" x2="13" y2="32"/><line x1="51" y1="32" x2="56" y2="32"/>
+            <line x1="15" y1="15" x2="18.5" y2="18.5"/><line x1="45.5" y1="45.5" x2="49" y2="49"/>
+            <line x1="49" y1="15" x2="45.5" y2="18.5"/><line x1="18.5" y1="45.5" x2="15" y2="49"/>
           </g>
         </svg>`;
     }
     if (iconType === 'cloud') {
-      return `
-        <svg class="w-14 h-14" viewBox="0 0 64 64" fill="none">
-          <path d="M18 46h28a9 9 0 0 0 1.4-17.9A13 13 0 0 0 22 24a11 11 0 0 0-4 22Z" fill="#CBD5E1" stroke="#94A3B8" stroke-width="1.5"/>
-        </svg>`;
+      return `<svg class="w-14 h-14" viewBox="0 0 64 64" fill="none"><path d="M18 46h28a9 9 0 0 0 1.4-17.9A13 13 0 0 0 22 24a11 11 0 0 0-4 22Z" fill="#CBD5E1" stroke="#94A3B8" stroke-width="1.5"/></svg>`;
     }
     if (iconType === 'rain' || iconType === 'storm') {
       return `
         <svg class="w-14 h-14" viewBox="0 0 64 64" fill="none">
           <path d="M18 40h28a8.5 8.5 0 0 0 1.3-16.9A12.5 12.5 0 0 0 22 19a10.5 10.5 0 0 0-4 21Z" fill="#CBD5E1" stroke="#94A3B8" stroke-width="1.5"/>
           <g stroke="#0284C7" stroke-width="2.6" stroke-linecap="round">
-            <line x1="23" y1="45" x2="21" y2="52"/>
-            <line x1="32" y1="45" x2="30" y2="52"/>
-            <line x1="41" y1="45" x2="39" y2="52"/>
+            <line x1="23" y1="45" x2="21" y2="52"/><line x1="32" y1="45" x2="30" y2="52"/><line x1="41" y1="45" x2="39" y2="52"/>
           </g>
         </svg>`;
     }
@@ -961,10 +1413,8 @@ document.addEventListener('DOMContentLoaded', () => {
       <svg class="w-14 h-14" viewBox="0 0 64 64" fill="none">
         <circle cx="24" cy="24" r="11" fill="#FBBF24"/>
         <g stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round">
-          <line x1="24" y1="6" x2="24" y2="9"/>
-          <line x1="24" y1="39" x2="24" y2="42"/>
-          <line x1="6" y1="24" x2="9" y2="24"/>
-          <line x1="11.3" y1="11.3" x2="13.4" y2="13.4"/>
+          <line x1="24" y1="6" x2="24" y2="9"/><line x1="24" y1="39" x2="24" y2="42"/>
+          <line x1="6" y1="24" x2="9" y2="24"/><line x1="11.3" y1="11.3" x2="13.4" y2="13.4"/>
           <line x1="34.6" y1="13.4" x2="36.7" y2="11.3"/>
         </g>
         <path d="M22 44h24a8 8 0 0 0 1.2-15.9A11 11 0 0 0 26 24.5 9.5 9.5 0 0 0 22 44Z" fill="#E2E8F0" stroke="#CBD5E1" stroke-width="1.5"/>
@@ -1032,15 +1482,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchLiveWeather() {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(state.latitude)}&longitude=${encodeURIComponent(state.longitude)}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FJakarta`;
+
     try {
-      const res = await fetch(WEATHER_API_URL);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
       const current = data.current || {};
       const decoded = decodeWmoCode(Number(current.weather_code));
 
-      // Match current hour prefix (YYYY-MM-DDTHH:00) in hourly.time
       let rainChance = 0;
       if (current.time && Array.isArray(data.hourly?.time) && Array.isArray(data.hourly?.precipitation_probability)) {
         const hourKey = `${String(current.time).slice(0, 13)}:00`;
@@ -1102,6 +1553,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  fetchLiveWeather();
-  setInterval(fetchLiveWeather, 10 * 60 * 1000);
+  /* =========================================================================
+     12. Bootstrap Dashboard from Server DB
+     ========================================================================= */
+  async function bootstrapDashboard() {
+    try {
+      const { ok, data } = await apiRequest('/api/dashboard');
+      if (ok && data.ok) {
+        applyDashboardSnapshot(data);
+      }
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        console.warn('Gagal memuat data awal dashboard:', err);
+        renderPumpState();
+        renderSoilSummaryCard();
+        renderPlotsTable();
+      }
+    } finally {
+      fetchLiveWeather();
+      setInterval(fetchLiveWeather, 10 * 60 * 1000);
+    }
+  }
+
+  bootstrapDashboard();
 });

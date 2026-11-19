@@ -6,6 +6,15 @@
   <meta name="description" content="Irigasi Cerdas — Dasbor Pemantauan Kelembapan Tanah, Tandon Air, Cuaca, dan Kontrol Pompa Otomatis.">
   <title>Irigasi Cerdas — Dasbor Lahan</title>
 
+  <!-- Auth Guard: redirect immediately if no session token is present -->
+  <script>
+    try {
+      if (!localStorage.getItem('irigasi_cerdas_token')) {
+        window.location.replace('login.html?auth=required');
+      }
+    } catch (e) {}
+  </script>
+
   <!-- Google Fonts: Plus Jakarta Sans -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -257,6 +266,7 @@
               <div class="px-3 py-2 border-b border-slate-100">
                 <p id="popover-user-name" class="text-xs font-bold text-slate-900 truncate">Pengguna</p>
                 <p id="popover-user-role" class="text-[11px] text-slate-500 truncate">Pemilik Lahan</p>
+                <p id="popover-user-email" class="hidden mt-1 text-[11px] font-semibold text-brand-700 truncate"></p>
               </div>
               <a href="login.html" id="btn-logout" class="mt-1 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -314,7 +324,7 @@
               <div>
                 <p class="text-[13px] font-medium text-slate-600">Kondisi Tanah</p>
                 <p id="card-soil-value" class="text-[22px] font-extrabold text-slate-900 tracking-tight mt-0.5">Lembap (72%)</p>
-                <p class="text-[12.5px] font-medium text-brand-700 mt-2">Ideal untuk tanaman</p>
+                <p id="card-soil-subtext" class="text-[12.5px] font-medium text-brand-700 mt-2">Ideal untuk tanaman</p>
               </div>
             </article>
 
@@ -561,22 +571,28 @@
 
             <!-- Left (Table Card - Status Petak Lahan) -->
             <div class="lg:col-span-8 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
-              <div class="flex items-center justify-between mb-4">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <h2 class="text-[17px] font-bold text-slate-900">Status Petak Lahan</h2>
-                <button type="button" data-jump-nav="petak-lahan" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
-                  Lihat Semua Petak
-                </button>
+                <div class="flex items-center gap-3">
+                  <button type="button" id="btn-open-add-plot" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 text-[12.5px] font-bold transition-colors">
+                    <span>+ Tambah Petak</span>
+                  </button>
+                  <button type="button" data-jump-nav="petak-lahan" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                    Lihat Semua Petak
+                  </button>
+                </div>
               </div>
 
               <div class="overflow-x-auto -mx-2 px-2">
-                <table class="w-full text-left border-collapse min-w-[580px]">
+                <table class="w-full text-left border-collapse min-w-[640px]">
                   <thead>
                     <tr class="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                       <th class="pb-3 pr-4">NAMA PETAK</th>
                       <th class="pb-3 px-3">TANAMAN</th>
                       <th class="pb-3 px-3">KELEMBAPAN</th>
                       <th class="pb-3 px-3">STATUS POMPA</th>
-                      <th class="pb-3 pl-3 text-right">UPDATE TERAKHIR</th>
+                      <th class="pb-3 px-3 text-right">UPDATE TERAKHIR</th>
+                      <th class="pb-3 pl-3 text-right">AKSI</th>
                     </tr>
                   </thead>
                   <tbody id="plots-table-body" class="divide-y divide-slate-100 text-[13.5px]">
@@ -642,11 +658,19 @@
             <!-- Right (Weather Widget - Prakiraan Cuaca Lokal) -->
             <div class="lg:col-span-4 bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col justify-between">
               <div>
-                <div class="flex items-center justify-between mb-4">
-                  <h2 class="text-[17px] font-bold text-slate-900">Prakiraan Cuaca Lokal</h2>
-                  <button type="button" data-jump-nav="cuaca" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
-                    Detail
-                  </button>
+                <div class="flex items-start justify-between gap-2 mb-4">
+                  <div>
+                    <h2 class="text-[17px] font-bold text-slate-900">Prakiraan Cuaca Lokal</h2>
+                    <p id="weather-location-label" class="text-[12px] font-medium text-slate-500 mt-0.5">Semarang, Jawa Tengah</p>
+                  </div>
+                  <div class="flex items-center gap-2.5 flex-shrink-0">
+                    <button type="button" id="btn-open-location-modal" class="text-[12px] font-semibold px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">
+                      Ubah Lokasi
+                    </button>
+                    <button type="button" data-jump-nav="cuaca" class="text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                      Detail
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Main Weather Info -->
@@ -746,6 +770,62 @@
         </div>
 
       </main>
+    </div>
+  </div>
+
+  <!-- Modal: Tambah / Edit Petak Lahan -->
+  <div id="modal-plot" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-[1px]" role="dialog" aria-modal="true" aria-labelledby="modal-plot-title">
+    <div class="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="modal-plot-title" class="text-lg font-extrabold text-slate-900">Tambah Petak Lahan</h3>
+        <button type="button" id="modal-plot-close" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Tutup">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <form id="form-plot" class="space-y-4">
+        <input type="hidden" id="plot-edit-id" value="">
+        <div>
+          <label for="plot-input-name" class="block text-xs font-bold text-slate-700 mb-1.5">Nama Petak</label>
+          <input type="text" id="plot-input-name" required placeholder="Contoh: Petak Timur" class="w-full h-11 px-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:bg-white focus:border-brand-600 focus:outline-none">
+        </div>
+        <div>
+          <label for="plot-input-crop" class="block text-xs font-bold text-slate-700 mb-1.5">Jenis Tanaman</label>
+          <input type="text" id="plot-input-crop" required placeholder="Contoh: Cabai Rawit / Jagung" class="w-full h-11 px-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:bg-white focus:border-brand-600 focus:outline-none">
+        </div>
+        <div>
+          <div class="flex items-center justify-between text-xs font-bold text-slate-700 mb-1.5">
+            <label for="plot-input-moisture">Kelembapan Tanah Awal</label>
+            <span id="plot-moisture-val" class="text-brand-700">65%</span>
+          </div>
+          <input type="range" id="plot-input-moisture" min="15" max="95" value="65" class="w-full irigasi-slider">
+        </div>
+        <div class="flex items-center justify-end gap-2.5 pt-2">
+          <button type="button" id="modal-plot-cancel" class="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">Batal</button>
+          <button type="submit" id="modal-plot-submit" class="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">Simpan Petak</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Ubah Lokasi Cuaca Lahan -->
+  <div id="modal-location" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-[1px]" role="dialog" aria-modal="true" aria-labelledby="modal-location-title">
+    <div class="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 id="modal-location-title" class="text-lg font-extrabold text-slate-900">Pilih Lokasi Lahan</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Prakiraan cuaca otomatis menyesuaikan kota atau kecamatan yang dipilih.</p>
+        </div>
+        <button type="button" id="modal-location-close" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Tutup">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <form id="form-location-search" class="flex gap-2">
+        <input type="text" id="location-search-input" required placeholder="Cari kota/kecamatan (misal: Bandung)" class="flex-1 h-11 px-3.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:bg-white focus:border-brand-600 focus:outline-none">
+        <button type="submit" id="btn-location-search" class="px-4 h-11 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">Cari</button>
+      </form>
+      <div id="location-results" class="max-h-60 overflow-y-auto space-y-2 text-sm">
+        <p class="text-xs text-slate-400 text-center py-4">Ketik nama kota atau kabupaten di atas lalu klik Cari.</p>
+      </div>
     </div>
   </div>
 

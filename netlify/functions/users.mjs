@@ -5,7 +5,7 @@ export default async () => {
     const db = getDb();
 
     const users = await db.sql`
-      SELECT id, full_name, username, whatsapp, farm_name, created_at
+      SELECT id, full_name, email, username, whatsapp, farm_name, email_verified, created_at
       FROM users
       ORDER BY id ASC
     `;
