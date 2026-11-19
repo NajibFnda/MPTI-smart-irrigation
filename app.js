@@ -79,6 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const headerUserName = document.getElementById('header-user-name');
   const headerUserRole = document.getElementById('header-user-role');
   const headerUserInitials = document.getElementById('header-user-initials');
+  const headerAdminBadge = document.getElementById('header-admin-badge');
+  const sidebarAdminSection = document.getElementById('sidebar-admin-section');
   const popoverUserName = document.getElementById('popover-user-name');
   const popoverUserRole = document.getElementById('popover-user-role');
   const popoverUserEmail = document.getElementById('popover-user-email');
@@ -87,7 +89,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const userMenuPopover = document.getElementById('user-menu-popover');
   const btnLogout = document.getElementById('btn-logout');
 
-  let activeUser = { fullName: 'Pengguna', farmName: 'Pemilik Lahan', email: null, emailVerified: false };
+  let activeUser = {
+    id: null,
+    fullName: 'Pengguna',
+    farmName: 'Pemilik Lahan',
+    email: null,
+    role: 'user',
+    emailVerified: false,
+  };
 
   function getInitials(name) {
     const parts = String(name || 'Pengguna').trim().split(/\s+/);
@@ -97,17 +106,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyUserProfile(user) {
     if (!user?.fullName) return;
-    activeUser = { ...activeUser, ...user };
+    activeUser = { ...activeUser, ...user, role: user.role || activeUser.role || 'user' };
     const displayName = activeUser.fullName;
     const displayRole = activeUser.farmName || 'Pemilik Lahan';
     const initials = getInitials(displayName);
+    const isAdmin = activeUser.role === 'admin';
 
     document.title = `Irigasi Cerdas — Dasbor Lahan ${displayName}`;
     if (headerUserName) headerUserName.textContent = displayName;
     if (headerUserRole) headerUserRole.textContent = displayRole;
     if (headerUserInitials) headerUserInitials.textContent = initials;
+    if (headerAdminBadge) headerAdminBadge.classList.toggle('hidden', !isAdmin);
+    if (sidebarAdminSection) sidebarAdminSection.classList.toggle('hidden', !isAdmin);
     if (popoverUserName) popoverUserName.textContent = displayName;
-    if (popoverUserRole) popoverUserRole.textContent = displayRole;
+    if (popoverUserRole) popoverUserRole.textContent = isAdmin ? `${displayRole} • Admin` : displayRole;
     if (popoverUserEmail && activeUser.email) {
       popoverUserEmail.textContent = activeUser.emailVerified
         ? `✓ ${activeUser.email}`
@@ -652,7 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderMoistureChart();
     renderNotifications();
 
-    if (currentNav !== 'dashboard') renderSecondaryView(currentNav);
+    if (currentNav !== 'dashboard' && currentNav !== 'admin') renderSecondaryView(currentNav);
   }
 
   async function persistSettings(payload, toastMessage) {
@@ -874,7 +886,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPlotsTable();
         renderMoistureChart();
         renderNotifications();
-        if (currentNav !== 'dashboard' && currentNav !== 'pengaturan-alat') {
+        if (currentNav !== 'dashboard' && currentNav !== 'pengaturan-alat' && currentNav !== 'admin') {
           renderSecondaryView(currentNav);
         }
       }
@@ -1427,7 +1439,312 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Bantuan Penggunaan',
       subtitle: 'Panduan singkat memakai aplikasi Irigasi Cerdas.',
     },
+    admin: {
+      title: 'Panel Admin — Pengguna Terdaftar',
+      subtitle: 'Pantau seluruh akun yang mendaftar, status verifikasi OTP, peran Admin, dan kelola pengguna.',
+    },
   };
+
+  const adminState = {
+    users: [],
+    stats: { totalUsers: 0, verifiedUsers: 0, unverifiedUsers: 0, adminCount: 0 },
+    search: '',
+    filter: 'all',
+    loading: false,
+    error: '',
+    loadedOnce: false,
+  };
+
+  function formatAdminDate(raw) {
+    if (!raw) return '-';
+    const normalized = String(raw).includes('T') ? String(raw) : String(raw).replace(' ', 'T');
+    const dt = new Date(normalized);
+    if (Number.isNaN(dt.getTime())) return String(raw);
+    return new Intl.DateTimeFormat('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(dt);
+  }
+
+  function getFilteredAdminUsers() {
+    const q = adminState.search.trim().toLowerCase();
+    return adminState.users.filter((u) => {
+      if (adminState.filter === 'verified' && !u.emailVerified) return false;
+      if (adminState.filter === 'unverified' && u.emailVerified) return false;
+      if (adminState.filter === 'admin' && u.role !== 'admin') return false;
+      if (!q) return true;
+      const hay = [
+        u.fullName,
+        u.email,
+        u.username,
+        u.whatsapp,
+        u.farmName,
+        u.locationName,
+        u.role,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  async function loadAdminUsers({ silent = false } = {}) {
+    if (activeUser.role !== 'admin') return;
+    adminState.loading = true;
+    adminState.error = '';
+    if (currentNav === 'admin' && !silent) renderSecondaryView('admin');
+
+    try {
+      const { ok, status, data } = await apiRequest('/api/users');
+      if (!ok || !data.ok) {
+        adminState.error =
+          status === 403
+            ? 'Akses ditolak. Akun Anda bukan Admin.'
+            : data.message || 'Gagal memuat daftar pengguna.';
+      } else {
+        adminState.users = Array.isArray(data.users) ? data.users : [];
+        adminState.stats = data.stats || {
+          totalUsers: adminState.users.length,
+          verifiedUsers: adminState.users.filter((u) => u.emailVerified).length,
+          unverifiedUsers: adminState.users.filter((u) => !u.emailVerified).length,
+          adminCount: adminState.users.filter((u) => u.role === 'admin').length,
+        };
+        adminState.loadedOnce = true;
+      }
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        adminState.error = 'Gagal terhubung ke server saat memuat daftar pengguna.';
+      }
+    } finally {
+      adminState.loading = false;
+      if (currentNav === 'admin') renderSecondaryView('admin');
+    }
+  }
+
+  async function updateAdminUser(userId, payload) {
+    try {
+      const { ok, data } = await apiRequest('/api/users', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: userId, ...payload }),
+      });
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal memperbarui pengguna.', 'error');
+        return;
+      }
+      adminState.users = Array.isArray(data.users) ? data.users : adminState.users;
+      if (data.stats) adminState.stats = data.stats;
+      showToast(data.message || 'Data pengguna diperbarui.');
+      if (currentNav === 'admin') renderSecondaryView('admin');
+    } catch {
+      showToast('Koneksi server terganggu saat memperbarui pengguna.', 'error');
+    }
+  }
+
+  async function deleteAdminUser(userId, fullName) {
+    if (!window.confirm(`Hapus akun "${fullName}" beserta seluruh data lahannya? Tindakan ini tidak dapat dibatalkan.`)) {
+      return;
+    }
+    try {
+      const { ok, data } = await apiRequest('/api/users', {
+        method: 'DELETE',
+        body: JSON.stringify({ id: userId }),
+      });
+      if (!ok || !data.ok) {
+        showToast(data.message || 'Gagal menghapus pengguna.', 'error');
+        return;
+      }
+      adminState.users = Array.isArray(data.users) ? data.users : adminState.users;
+      if (data.stats) adminState.stats = data.stats;
+      showToast(data.message || `Akun ${fullName} dihapus.`, 'info');
+      if (currentNav === 'admin') renderSecondaryView('admin');
+    } catch {
+      showToast('Koneksi server terganggu saat menghapus pengguna.', 'error');
+    }
+  }
+
+  function downloadAdminUsersCsv() {
+    const filtered = getFilteredAdminUsers();
+    const rows = [
+      ['ID', 'Nama Lengkap', 'Peran', 'Email', 'Username', 'WhatsApp', 'Nama Kebun', 'Lokasi Cuaca', 'Status Email', 'Jumlah Petak', 'Jumlah Log', 'Tanggal Daftar'],
+      ...filtered.map((u) => [
+        u.id,
+        u.fullName,
+        u.role === 'admin' ? 'Admin' : 'Pengguna',
+        u.email || '-',
+        u.username,
+        u.whatsapp || '-',
+        u.farmName,
+        u.locationName || '-',
+        u.emailVerified ? 'Terverifikasi' : 'Belum Verifikasi',
+        u.plotCount,
+        u.activityCount,
+        formatAdminDate(u.createdAt),
+      ]),
+    ];
+
+    const csvContent = rows
+      .map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Daftar_Pengguna_Irigasi_Cerdas_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`Data ${filtered.length} pengguna berhasil diunduh (CSV).`);
+  }
+
+  function buildAdminRowsHtml(usersList) {
+    if (adminState.loading && !adminState.loadedOnce) {
+      return `
+        <tr>
+          <td colspan="7" class="py-10 text-center text-xs text-slate-500">
+            Memuat daftar pengguna terdaftar dari database...
+          </td>
+        </tr>
+      `;
+    }
+    if (adminState.error) {
+      return `
+        <tr>
+          <td colspan="7" class="py-10 text-center text-xs font-semibold text-rose-600">
+            ${escapeHtml(adminState.error)}
+          </td>
+        </tr>
+      `;
+    }
+    if (usersList.length === 0) {
+      return `
+        <tr>
+          <td colspan="7" class="py-10 text-center text-xs text-slate-500">
+            Tidak ada pengguna yang cocok dengan pencarian/filter saat ini.
+          </td>
+        </tr>
+      `;
+    }
+
+    const avatarPalette = [
+      'bg-[#E8F5E9] text-brand-700',
+      'bg-[#E0F2FE] text-sky-700',
+      'bg-[#FEF3C7] text-amber-700',
+      'bg-[#EDE9FE] text-purple-700',
+    ];
+
+    return usersList
+      .map((u, idx) => {
+        const isSelf = Number(u.id) === Number(activeUser.id);
+        const isAdmin = u.role === 'admin';
+        const avatarCls = avatarPalette[idx % avatarPalette.length];
+        const roleBadge = isAdmin
+          ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#EDE9FE] text-purple-700">Admin</span>'
+          : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-slate-100 text-slate-600">Pengguna</span>';
+        const statusBadge = u.emailVerified
+          ? '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#E8F5E9] text-brand-700"><span class="w-1.5 h-1.5 rounded-full bg-brand-600"></span>Terverifikasi</span>'
+          : '<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#FEF3C7] text-amber-700"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Belum Verif</span>';
+
+        const actionsHtml = isSelf
+          ? '<span class="inline-flex px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-500">Akun Anda</span>'
+          : `
+            <div class="inline-flex flex-wrap items-center justify-end gap-1.5">
+              ${
+                !u.emailVerified
+                  ? `<button type="button" data-admin-verify="${u.id}" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors">Verifikasi</button>`
+                  : ''
+              }
+              <button type="button" data-admin-role="${u.id}" data-next-role="${isAdmin ? 'user' : 'admin'}" class="px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                isAdmin
+                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  : 'bg-[#EDE9FE] text-purple-700 hover:bg-purple-200/80'
+              } transition-colors">
+                ${isAdmin ? 'Cabut Admin' : 'Jadikan Admin'}
+              </button>
+              <button type="button" data-admin-delete="${u.id}" data-user-name="${escapeHtml(u.fullName)}" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 transition-colors">
+                Hapus
+              </button>
+            </div>
+          `;
+
+        return `
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50/70 transition-colors">
+            <td class="py-3.5 pr-4">
+              <div class="flex items-center gap-3">
+                <span class="w-9 h-9 rounded-full ${avatarCls} text-xs font-extrabold flex items-center justify-center flex-shrink-0">
+                  ${escapeHtml(getInitials(u.fullName))}
+                </span>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <p class="font-bold text-slate-900 truncate">${escapeHtml(u.fullName)}</p>
+                    ${roleBadge}
+                  </div>
+                  <p class="text-[11px] text-slate-400">ID #${u.id}</p>
+                </div>
+              </div>
+            </td>
+            <td class="py-3.5 px-3">
+              <p class="font-semibold text-slate-800">${escapeHtml(u.email || '-')}</p>
+              <p class="text-[11.5px] text-slate-500">@${escapeHtml(u.username)}${u.whatsapp ? ` • ${escapeHtml(u.whatsapp)}` : ''}</p>
+            </td>
+            <td class="py-3.5 px-3">
+              <p class="font-semibold text-slate-800">${escapeHtml(u.farmName)}</p>
+              <p class="text-[11.5px] text-slate-500">${escapeHtml(u.locationName || '-')}</p>
+            </td>
+            <td class="py-3.5 px-3">${statusBadge}</td>
+            <td class="py-3.5 px-3 text-slate-600 font-medium">
+              <span>${u.plotCount} petak</span>
+              <span class="text-slate-300 mx-1">•</span>
+              <span>${u.activityCount} log</span>
+            </td>
+            <td class="py-3.5 px-3 text-slate-500 text-[12px] whitespace-nowrap">${escapeHtml(formatAdminDate(u.createdAt))}</td>
+            <td class="py-3.5 pl-3 text-right whitespace-nowrap">${actionsHtml}</td>
+          </tr>
+        `;
+      })
+      .join('');
+  }
+
+  function bindAdminRowActions(container) {
+    if (!container) return;
+    container.querySelectorAll('[data-admin-verify]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.getAttribute('data-admin-verify'));
+        updateAdminUser(id, { emailVerified: true });
+      });
+    });
+    container.querySelectorAll('[data-admin-role]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.getAttribute('data-admin-role'));
+        const nextRole = btn.getAttribute('data-next-role');
+        updateAdminUser(id, { role: nextRole });
+      });
+    });
+    container.querySelectorAll('[data-admin-delete]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.getAttribute('data-admin-delete'));
+        const name = btn.getAttribute('data-user-name') || 'pengguna ini';
+        deleteAdminUser(id, name);
+      });
+    });
+  }
+
+  function updateAdminTableOnly() {
+    const tbody = document.getElementById('admin-users-tbody');
+    const countLabel = document.getElementById('admin-users-count');
+    const filtered = getFilteredAdminUsers();
+    if (tbody) {
+      tbody.innerHTML = buildAdminRowsHtml(filtered);
+      bindAdminRowActions(tbody);
+    }
+    if (countLabel) {
+      countLabel.textContent = `Menampilkan ${filtered.length} dari ${adminState.users.length} akun terdaftar`;
+    }
+  }
 
   function renderSecondaryView(section) {
     if (!secondaryBody || !secondaryTitle || !secondarySubtitle) return;
@@ -1856,10 +2173,172 @@ document.addEventListener('DOMContentLoaded', () => {
           </ul>
         </div>
       `;
+    } else if (section === 'admin') {
+      const stats = adminState.stats || {
+        totalUsers: adminState.users.length,
+        verifiedUsers: adminState.users.filter((u) => u.emailVerified).length,
+        unverifiedUsers: adminState.users.filter((u) => !u.emailVerified).length,
+        adminCount: adminState.users.filter((u) => u.role === 'admin').length,
+      };
+      const filtered = getFilteredAdminUsers();
+      const filterPills = [
+        { key: 'all', label: `Semua (${stats.totalUsers})` },
+        { key: 'verified', label: `Terverifikasi (${stats.verifiedUsers})` },
+        { key: 'unverified', label: `Belum Verif (${stats.unverifiedUsers})` },
+        { key: 'admin', label: `Admin (${stats.adminCount})` },
+      ];
+
+      secondaryBody.innerHTML = `
+        <div class="md:col-span-2 lg:col-span-3 space-y-5">
+          <!-- 4 Pastel Admin Stat Cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-[#EFF8F1] rounded-2xl border border-[#E1EFE4] p-5 flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12.5px] font-semibold text-brand-700">Total Pengguna</p>
+                <p class="text-[26px] font-extrabold text-slate-900 mt-1 leading-tight">${stats.totalUsers}</p>
+                <p class="text-[12px] text-slate-500 mt-1.5">Semua akun terdaftar</p>
+              </div>
+              <div class="w-10 h-10 rounded-xl bg-[#DCF1E1] text-brand-700 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </div>
+            </div>
+
+            <div class="bg-[#EEF6FD] rounded-2xl border border-[#DCEBFA] p-5 flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12.5px] font-semibold text-sky-700">Email Terverifikasi</p>
+                <p class="text-[26px] font-extrabold text-slate-900 mt-1 leading-tight">${stats.verifiedUsers}</p>
+                <p class="text-[12px] text-slate-500 mt-1.5">Sudah konfirmasi OTP</p>
+              </div>
+              <div class="w-10 h-10 rounded-xl bg-[#DCEEFB] text-sky-700 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+            </div>
+
+            <div class="bg-[#FEF9EA] rounded-2xl border border-[#F8EED0] p-5 flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12.5px] font-semibold text-amber-700">Belum Verifikasi</p>
+                <p class="text-[26px] font-extrabold text-slate-900 mt-1 leading-tight">${stats.unverifiedUsers}</p>
+                <p class="text-[12px] text-slate-500 mt-1.5">Menunggu OTP email</p>
+              </div>
+              <div class="w-10 h-10 rounded-xl bg-[#FDECC8] text-amber-700 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+            </div>
+
+            <div class="bg-[#F5F2FC] rounded-2xl border border-[#E7E0F8] p-5 flex items-start justify-between gap-3">
+              <div>
+                <p class="text-[12.5px] font-semibold text-purple-700">Total Admin</p>
+                <p class="text-[26px] font-extrabold text-slate-900 mt-1 leading-tight">${stats.adminCount}</p>
+                <p class="text-[12px] text-slate-500 mt-1.5">Akses pengelola penuh</p>
+              </div>
+              <div class="w-10 h-10 rounded-xl bg-[#EAE2FA] text-purple-700 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Users Directory Table Card -->
+          <div class="bg-white rounded-2xl border border-[#EEF2EF] p-5 sm:p-6 shadow-[0_1px_2px_rgba(16,24,40,0.03)] space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div class="relative flex-1 max-w-md">
+                <svg class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input
+                  type="search"
+                  id="admin-search-input"
+                  value="${escapeHtml(adminState.search)}"
+                  placeholder="Cari nama, email, username, kebun, atau kota..."
+                  class="w-full h-10 pl-10 pr-3.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:border-brand-600 focus:outline-none"
+                >
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" id="admin-refresh-btn" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-colors">
+                  <svg class="w-3.5 h-3.5 ${adminState.loading ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  <span>${adminState.loading ? 'Memuat...' : 'Muat Ulang'}</span>
+                </button>
+                <button type="button" id="admin-export-csv-btn" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-brand-600 bg-brand-50/70 hover:bg-brand-100 text-brand-700 text-xs font-bold transition-colors">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span>Unduh CSV</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Filter Pills -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-1">
+              <div class="flex flex-wrap items-center gap-1.5">
+                ${filterPills
+                  .map(
+                    (f) => `
+                  <button type="button" data-admin-filter="${f.key}" class="px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                    adminState.filter === f.key
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }">
+                    ${f.label}
+                  </button>
+                `
+                  )
+                  .join('')}
+              </div>
+              <p id="admin-users-count" class="text-[12px] font-medium text-slate-500">
+                Menampilkan ${filtered.length} dari ${adminState.users.length} akun terdaftar
+              </p>
+            </div>
+
+            <!-- Table -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-[13px] min-w-[780px]">
+                <thead>
+                  <tr class="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <th class="pb-3 pr-4">PENGGUNA</th>
+                    <th class="pb-3 px-3">EMAIL &amp; USERNAME</th>
+                    <th class="pb-3 px-3">KEBUN &amp; LOKASI</th>
+                    <th class="pb-3 px-3">STATUS EMAIL</th>
+                    <th class="pb-3 px-3">DATA LAHAN</th>
+                    <th class="pb-3 px-3">TERDAFTAR</th>
+                    <th class="pb-3 pl-3 text-right">AKSI</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-users-tbody">
+                  ${buildAdminRowsHtml(filtered)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const searchInput = document.getElementById('admin-search-input');
+      searchInput?.addEventListener('input', (e) => {
+        adminState.search = e.target.value;
+        updateAdminTableOnly();
+      });
+
+      secondaryBody.querySelectorAll('[data-admin-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          adminState.filter = btn.getAttribute('data-admin-filter') || 'all';
+          renderSecondaryView('admin');
+        });
+      });
+
+      document.getElementById('admin-refresh-btn')?.addEventListener('click', () => {
+        loadAdminUsers();
+      });
+
+      document.getElementById('admin-export-csv-btn')?.addEventListener('click', () => {
+        downloadAdminUsersCsv();
+      });
+
+      bindAdminRowActions(document.getElementById('admin-users-tbody'));
     }
   }
 
   function navigateTo(section) {
+    if (section === 'admin' && activeUser.role !== 'admin') {
+      showToast('Akses ditolak. Halaman Panel Admin khusus akun Admin.', 'error');
+      section = 'dashboard';
+    }
+
     currentNav = section;
     navLinks.forEach((link) => {
       const isMatch = link.getAttribute('data-nav') === section;
@@ -1875,6 +2354,9 @@ document.addEventListener('DOMContentLoaded', () => {
       viewDashboard?.classList.add('hidden');
       viewSecondary?.classList.remove('hidden');
       renderSecondaryView(section);
+      if (section === 'admin') {
+        loadAdminUsers({ silent: adminState.loadedOnce });
+      }
     }
 
     if (window.innerWidth < 1024) setSidebarOpen(false);

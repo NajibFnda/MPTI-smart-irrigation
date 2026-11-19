@@ -35,6 +35,7 @@ if (fs.existsSync(ENV_PATH)) {
 
 fs.mkdirSync(DB_DIR, { recursive: true });
 const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA foreign_keys = ON;');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -44,6 +45,7 @@ db.exec(`
     username TEXT NOT NULL UNIQUE,
     whatsapp TEXT,
     farm_name TEXT NOT NULL DEFAULT 'Pemilik Lahan',
+    role TEXT NOT NULL DEFAULT 'user',
     password_hash TEXT NOT NULL,
     email_verified INTEGER NOT NULL DEFAULT 0,
     otp_hash TEXT,
@@ -118,6 +120,7 @@ db.exec(`
 const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 for (const [col, sql] of [
   ['email', 'ALTER TABLE users ADD COLUMN email TEXT'],
+  ['role', "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"],
   ['email_verified', 'ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0'],
   ['otp_hash', 'ALTER TABLE users ADD COLUMN otp_hash TEXT'],
   ['otp_expires_at', 'ALTER TABLE users ADD COLUMN otp_expires_at TEXT'],
@@ -125,6 +128,13 @@ for (const [col, sql] of [
 ]) {
   if (!userCols.includes(col)) db.exec(sql);
 }
+
+db.exec(`
+  UPDATE users
+  SET role = 'admin'
+  WHERE LOWER(email) = 'fnaandd44@gmail.com'
+     OR LOWER(username) = 'fnaandd44'
+`);
 
 const settingsCols = db.prepare('PRAGMA table_info(user_settings)').all().map((c) => c.name);
 for (const [col, sql] of [
@@ -162,6 +172,7 @@ function createSessionToken(user) {
   const payload = {
     uid: Number(user.id),
     username: user.username,
+    role: user.role || 'user',
     exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -195,6 +206,64 @@ function requireAuth(req) {
   const match = String(header).match(/^Bearer\s+(.+)$/i);
   if (!match) return null;
   return verifySessionToken(match[1].trim());
+}
+
+function requireAdmin(req) {
+  const auth = requireAuth(req);
+  if (!auth) return { ok: false, status: 401, message: 'Sesi tidak valid. Silakan masuk kembali.' };
+  const user = db.prepare('SELECT id, full_name, email, username, role FROM users WHERE id = ?').get(auth.uid);
+  if (!user) return { ok: false, status: 401, message: 'Akun tidak ditemukan.' };
+  if (user.role !== 'admin') {
+    return { ok: false, status: 403, message: 'Akses ditolak. Halaman ini hanya untuk akun Admin.' };
+  }
+  return { ok: true, user };
+}
+
+function fetchAdminUsersPayload() {
+  const rows = db
+    .prepare(
+      `SELECT
+         u.id,
+         u.full_name,
+         u.email,
+         u.username,
+         u.whatsapp,
+         u.farm_name,
+         u.role,
+         u.email_verified,
+         u.created_at,
+         COALESCE(us.location_name, '-') AS location_name,
+         (SELECT COUNT(*) FROM plots p WHERE p.user_id = u.id) AS plot_count,
+         (SELECT COUNT(*) FROM activity_logs a WHERE a.user_id = u.id) AS activity_count
+       FROM users u
+       LEFT JOIN user_settings us ON us.user_id = u.id
+       ORDER BY u.id DESC`
+    )
+    .all();
+
+  const users = rows.map((r) => ({
+    id: r.id,
+    fullName: r.full_name,
+    email: r.email || null,
+    username: r.username,
+    whatsapp: r.whatsapp || null,
+    farmName: r.farm_name || 'Pemilik Lahan',
+    role: r.role || 'user',
+    emailVerified: Boolean(r.email_verified),
+    locationName: r.location_name || '-',
+    plotCount: Number(r.plot_count || 0),
+    activityCount: Number(r.activity_count || 0),
+    createdAt: r.created_at,
+  }));
+
+  const stats = {
+    totalUsers: users.length,
+    verifiedUsers: users.filter((u) => u.emailVerified).length,
+    unverifiedUsers: users.filter((u) => !u.emailVerified).length,
+    adminCount: users.filter((u) => u.role === 'admin').length,
+  };
+
+  return { users, stats };
 }
 
 function normalizeIdentifier(value) {
@@ -514,7 +583,7 @@ const server = http.createServer(async (req, res) => {
       if (!/^\d{6}$/.test(otp)) return sendJson(res, 400, { ok: false, message: 'Mohon masukkan 6 digit kode OTP angka.' });
 
       const user = db
-        .prepare('SELECT id, full_name, email, username, farm_name, email_verified, otp_hash, otp_expires_at, otp_attempts FROM users WHERE LOWER(email) = ?')
+        .prepare('SELECT id, full_name, email, username, farm_name, role, email_verified, otp_hash, otp_expires_at, otp_attempts FROM users WHERE LOWER(email) = ?')
         .get(email);
       if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
       if (user.email_verified) {
@@ -522,7 +591,7 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           token: createSessionToken(user),
           message: 'Email sudah terverifikasi sebelumnya.',
-          user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, emailVerified: true },
+          user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, role: user.role || 'user', emailVerified: true },
         });
       }
       if ((user.otp_attempts || 0) >= 5) return sendJson(res, 429, { ok: false, message: 'Terlalu banyak percobaan OTP salah.' });
@@ -539,7 +608,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         token: createSessionToken(user),
         message: 'Email berhasil diverifikasi! Membuka Dashboard...',
-        user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, emailVerified: true },
+        user: { id: user.id, fullName: user.full_name, email: user.email, username: user.username, farmName: user.farm_name, role: user.role || 'user', emailVerified: true },
       });
     } catch {
       return sendJson(res, 400, { ok: false, message: 'Permintaan verifikasi tidak valid.' });
@@ -628,7 +697,7 @@ const server = http.createServer(async (req, res) => {
 
       const user = db
         .prepare(
-          `SELECT id, full_name, email, username, farm_name, password_hash, email_verified
+          `SELECT id, full_name, email, username, farm_name, role, password_hash, email_verified
            FROM users
            WHERE LOWER(username) = ? OR (email IS NOT NULL AND LOWER(email) = ?) OR (whatsapp IS NOT NULL AND LOWER(whatsapp) = ?)`
         )
@@ -650,6 +719,7 @@ const server = http.createServer(async (req, res) => {
           email: user.email || null,
           username: user.username,
           farmName: user.farm_name,
+          role: user.role || 'user',
           emailVerified: Boolean(user.email_verified),
         },
       });
@@ -662,7 +732,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname === '/api/me') {
     const auth = requireAuth(req);
     if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
-    const user = db.prepare('SELECT id, full_name, email, username, farm_name, email_verified FROM users WHERE id = ?').get(auth.uid);
+    const user = db.prepare('SELECT id, full_name, email, username, farm_name, role, email_verified FROM users WHERE id = ?').get(auth.uid);
     if (!user) return sendJson(res, 401, { ok: false, message: 'Akun tidak ditemukan.' });
     return sendJson(res, 200, {
       ok: true,
@@ -672,6 +742,7 @@ const server = http.createServer(async (req, res) => {
         email: user.email || null,
         username: user.username,
         farmName: user.farm_name,
+        role: user.role || 'user',
         emailVerified: Boolean(user.email_verified),
       },
     });
@@ -688,7 +759,7 @@ const server = http.createServer(async (req, res) => {
     const newPassword = String(body.newPassword || '');
     if (!fullName) return sendJson(res, 400, { ok: false, message: 'Nama Lengkap tidak boleh kosong.' });
 
-    const user = db.prepare('SELECT id, full_name, email, username, farm_name, password_hash, email_verified FROM users WHERE id = ?').get(auth.uid);
+    const user = db.prepare('SELECT id, full_name, email, username, farm_name, role, password_hash, email_verified FROM users WHERE id = ?').get(auth.uid);
     if (!user) return sendJson(res, 404, { ok: false, message: 'Akun tidak ditemukan.' });
 
     let nextPasswordHash = user.password_hash;
@@ -718,6 +789,7 @@ const server = http.createServer(async (req, res) => {
         email: user.email || null,
         username: user.username,
         farmName,
+        role: user.role || 'user',
         emailVerified: Boolean(user.email_verified),
       },
     });
@@ -727,7 +799,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname === '/api/dashboard') {
     const auth = requireAuth(req);
     if (!auth) return sendJson(res, 401, { ok: false, message: 'Sesi tidak valid.' });
-    const user = db.prepare('SELECT id, full_name, email, username, farm_name, email_verified FROM users WHERE id = ?').get(auth.uid);
+    const user = db.prepare('SELECT id, full_name, email, username, farm_name, role, email_verified FROM users WHERE id = ?').get(auth.uid);
     if (!user) return sendJson(res, 401, { ok: false, message: 'Akun tidak ditemukan.' });
     return sendJson(res, 200, {
       ok: true,
@@ -737,6 +809,7 @@ const server = http.createServer(async (req, res) => {
         email: user.email || null,
         username: user.username,
         farmName: user.farm_name,
+        role: user.role || 'user',
         emailVerified: Boolean(user.email_verified),
       },
       ...getDashboardSnapshot(user.id),
@@ -927,12 +1000,84 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // API: Users list
-  if (req.method === 'GET' && pathname === '/api/users') {
-    const users = db
-      .prepare('SELECT id, full_name, email, username, whatsapp, farm_name, email_verified, created_at FROM users ORDER BY id ASC')
-      .all();
-    return sendJson(res, 200, { ok: true, users });
+  // API: Admin Users Management (GET, PATCH, DELETE /api/users)
+  if (pathname === '/api/users' && ['GET', 'PATCH', 'DELETE'].includes(req.method)) {
+    const adminCheck = requireAdmin(req);
+    if (!adminCheck.ok) {
+      return sendJson(res, adminCheck.status, { ok: false, message: adminCheck.message });
+    }
+
+    if (req.method === 'GET') {
+      return sendJson(res, 200, { ok: true, ...fetchAdminUsersPayload() });
+    }
+
+    try {
+      const body = await readRequestBody(req);
+      const targetId = Number(body.id);
+      if (!Number.isInteger(targetId) || targetId <= 0) {
+        return sendJson(res, 400, { ok: false, message: 'ID pengguna tidak valid.' });
+      }
+
+      if (req.method === 'PATCH') {
+        const target = db
+          .prepare('SELECT id, full_name, role, email_verified FROM users WHERE id = ?')
+          .get(targetId);
+        if (!target) {
+          return sendJson(res, 404, { ok: false, message: 'Pengguna tidak ditemukan.' });
+        }
+        if (target.id === adminCheck.user.id && body.role && body.role !== 'admin') {
+          return sendJson(res, 400, {
+            ok: false,
+            message: 'Anda tidak dapat mencabut hak Admin dari akun Anda sendiri.',
+          });
+        }
+
+        const nextRole =
+          body.role === 'admin' || body.role === 'user' ? body.role : target.role || 'user';
+        const nextVerified =
+          typeof body.emailVerified === 'boolean'
+            ? body.emailVerified
+              ? 1
+              : 0
+            : target.email_verified
+              ? 1
+              : 0;
+
+        db.prepare('UPDATE users SET role = ?, email_verified = ? WHERE id = ?').run(
+          nextRole,
+          nextVerified,
+          targetId
+        );
+
+        return sendJson(res, 200, {
+          ok: true,
+          message: `Data akun ${target.full_name} berhasil diperbarui.`,
+          ...fetchAdminUsersPayload(),
+        });
+      }
+
+      if (req.method === 'DELETE') {
+        if (targetId === adminCheck.user.id) {
+          return sendJson(res, 400, {
+            ok: false,
+            message: 'Anda tidak dapat menghapus akun Anda sendiri.',
+          });
+        }
+        const target = db.prepare('SELECT full_name FROM users WHERE id = ?').get(targetId);
+        if (!target) {
+          return sendJson(res, 404, { ok: false, message: 'Pengguna tidak ditemukan.' });
+        }
+        db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+
+        return sendJson(res, 200, {
+          ok: true,
+          message: `Akun ${target.full_name} berhasil dihapus.`,
+          ...fetchAdminUsersPayload(),
+        });
+      }
+    } catch {
+      return sendJson(res, 400, { ok: false, message: 'Gagal memproses data pengguna.' });
+    }
   }
 
   // Static File Serving

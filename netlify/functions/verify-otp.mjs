@@ -25,7 +25,7 @@ export default async (req) => {
 
     const db = getDb();
     const rows = await db.sql`
-      SELECT id, full_name, email, username, farm_name, email_verified, otp_hash, otp_expires_at, otp_attempts
+      SELECT id, full_name, email, username, farm_name, email_verified, role, otp_hash, otp_expires_at, otp_attempts
       FROM users
       WHERE LOWER(email) = ${email}
       LIMIT 1
@@ -53,6 +53,7 @@ export default async (req) => {
             username: user.username,
             farmName: user.farm_name,
             emailVerified: true,
+            role: user.role || 'user',
           },
         },
         { status: 200 }
@@ -114,6 +115,7 @@ export default async (req) => {
           username: user.username,
           farmName: user.farm_name,
           emailVerified: true,
+          role: user.role || 'user',
         },
       },
       { status: 200 }

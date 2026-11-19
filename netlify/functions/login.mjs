@@ -19,7 +19,7 @@ export default async (req) => {
     const db = getDb();
 
     const rows = await db.sql`
-      SELECT id, full_name, email, username, farm_name, password_hash, email_verified
+      SELECT id, full_name, email, username, farm_name, password_hash, email_verified, role
       FROM users
       WHERE LOWER(username) = ${identifier}
          OR (email IS NOT NULL AND LOWER(email) = ${identifier})
@@ -61,6 +61,7 @@ export default async (req) => {
           username: user.username,
           farmName: user.farm_name,
           emailVerified: Boolean(user.email_verified),
+          role: user.role || 'user',
         },
       },
       { status: 200 }

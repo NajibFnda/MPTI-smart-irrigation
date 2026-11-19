@@ -176,6 +176,27 @@
             </li>
           </ul>
         </div>
+
+        <!-- ADMIN (Hanya muncul untuk akun role admin) -->
+        <div id="sidebar-admin-section" class="hidden">
+          <p class="px-3 mb-2.5 text-[11px] font-bold uppercase tracking-wider text-purple-500">ADMIN</p>
+          <ul class="space-y-1" role="list">
+            <li>
+              <a href="#admin" data-nav="admin" class="nav-item flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-[14px] font-medium text-slate-600 hover:bg-purple-50/70 hover:text-purple-900 transition-colors">
+                <span class="flex items-center gap-3 min-w-0">
+                  <svg class="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                  </svg>
+                  <span class="truncate">Panel Admin</span>
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#EDE9FE] text-purple-700">Admin</span>
+              </a>
+            </li>
+          </ul>
+        </div>
       </nav>
     </aside>
 
@@ -198,7 +219,10 @@
 
           <!-- User Profile Info (left side like reference image) -->
           <div class="min-w-0">
-            <p id="header-user-name" class="text-[15px] font-bold text-slate-900 truncate">Pengguna</p>
+            <div class="flex items-center gap-2 min-w-0">
+              <p id="header-user-name" class="text-[15px] font-bold text-slate-900 truncate">Pengguna</p>
+              <span id="header-admin-badge" class="hidden flex-shrink-0 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#EDE9FE] text-purple-700 border border-[#DDD6FE]">Admin</span>
+            </div>
             <p id="header-user-role" class="text-[12px] font-medium text-slate-500 truncate">Pemilik Lahan</p>
           </div>
         </div>
