@@ -163,16 +163,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (authHeading && authSubheading) {
       if (isOtp) {
-        authHeading.textContent = 'Verifikasi Email Anda ✉️';
+        authHeading.textContent = 'Verifikasi Email Anda';
         authSubheading.textContent = 'Masukkan kode OTP 6 digit untuk mengaktifkan akun.';
       } else if (isForgot) {
-        authHeading.textContent = 'Reset Kata Sandi 🔑';
+        authHeading.textContent = 'Reset Kata Sandi';
         authSubheading.textContent = 'Atur ulang kata sandi menggunakan kode OTP yang dikirim ke email Anda.';
       } else if (isRegister) {
-        authHeading.textContent = 'Buat Akun Baru 🌱';
+        authHeading.textContent = 'Buat Akun Baru';
         authSubheading.textContent = 'Daftarkan diri Anda untuk mulai memantau kondisi lahan.';
       } else {
-        authHeading.textContent = 'Selamat Datang Kembali! 🌱';
+        authHeading.textContent = 'Selamat Datang Kembali!';
         authSubheading.textContent = 'Silakan masuk untuk memantau kondisi lahan Anda.';
       }
     }

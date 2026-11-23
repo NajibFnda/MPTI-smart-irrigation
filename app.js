@@ -189,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hour = now.getHours();
 
     if (greetingHeading) {
-      const greetingText = `${getTimeGreeting(hour)}, ${activeUser.fullName}! 🌱`;
+      const greetingText = `${getTimeGreeting(hour)}, ${activeUser.fullName}!`;
       if (greetingHeading.textContent !== greetingText) {
         greetingHeading.textContent = greetingText;
       }
